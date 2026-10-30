@@ -106,6 +106,7 @@ class Controller:
         self.selected_stage = None
         self.selection_evidence = None
         self.phase = 'created'
+        self.routing_decision = None
 
     def context(self, request_id=None):
         return {'run_id':self.run_id, 'request_id':request_id,
@@ -158,6 +159,8 @@ class Controller:
         self.budget.check()
         request_id = self.run_id + '.' + stage
         context = self.context(request_id)
+        if stage == 'initial' and prepared.audit().get('kind') == 'direct_solve':
+            context['solve_mode'] = 'direct'
         messages = canonical(prepared.to_chat_messages())
         self.generation_policy.require_current()
         generation = self.generation_policy.generation_bytes
@@ -165,7 +168,7 @@ class Controller:
         self.store.record('chain', stage+'-tokens.json', token_raw)
         count = token_receipt(token_raw, messages, generation, context)
         self.budget.check()
-        seconds = min(180 if stage == 'route' else 540 if stage == 'initial' else 720,
+        seconds = min(180 if stage == 'route' else (840 if context.get('solve_mode') == 'direct' else 540) if stage == 'initial' else 720,
                       self.budget.end-self.budget.check()-90)
         cap = min(4096 if stage == 'route' else 16384, 32768-count-128,
                   max(0, math.floor((seconds-12)*35)))
@@ -286,6 +289,7 @@ class Controller:
             'compiler_evidence':self.selection_evidence if self.selected is not None else None,
             'solution_sha256':digest(data), 'solution_bytes':len(data),
             'public_fields_sha256':self.public_sha,
+            'routing_decision':self.routing_decision,
             'interface_compatibility':'unknown','functional_status':'unknown',
             'model_claims':self.claims, 'adapter_handoffs':self.handoffs,
             'adapter_reported_posts':self.posts_reported, 'post_outcome_unknown':self.posts_unknown,
@@ -322,7 +326,21 @@ class Controller:
             self.budget.check()
             self.phase = 'runtime_checked'
             route = self.model('route', builder.build_route(public))
-            solve = builder.build_solve(public, route.decode('utf-8'))
+            try:
+                route_text = route.decode('utf-8')
+            except UnicodeError:
+                solve = builder.build_direct(public,'route_unusable',digest(route),
+                                             {'route_error':'invalid UTF-8','semantic_no_card_confirmed':False})
+            else:
+                solve = builder.build_solve(public, route_text)
+            audit = solve.audit()
+            self.routing_decision = {'mode':'direct' if audit['kind']=='direct_solve' else 'knowledge',
+                                     'reason':audit.get('reason','applicable_cards'),
+                                     'cards':audit.get('selected_leaf_ids',[]),
+                                     'raw_route_sha256':digest(route),
+                                     'router_selected_no_card':audit.get('router_selected_no_card',False),
+                                     'semantic_no_card_confirmed':audit.get('semantic_no_card_confirmed',False)}
+            self.emit('routing_decision',**self.routing_decision)
             initial = self.model('initial', solve)
             compiled = self.compile('initial', initial)
             if compiled['status'] == 'compile_fail' and compiled['failure'] is not None:

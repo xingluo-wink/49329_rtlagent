@@ -20,9 +20,9 @@
     "sha256": "1c91844019a4284d0c97d3c97fac17b559c5ae3fbe33079ecf69e2e48b698fd0"
   },
   "README.md": {
-    "bytes": 4064,
+    "bytes": 4567,
     "mode": 420,
-    "sha256": "6b1ad25c455e3fb658d9fb40378716f716e511a3deadf105ee7420b63a620ed3"
+    "sha256": "44f4632ab09c1ff4a6f1ca3084a073e02f3a3bc70e4b1668cb878ac8c909c229"
   },
   "REPORT.md": {
     "bytes": 17079,
@@ -75,9 +75,9 @@
     "sha256": "7a5d5a94b4df7b0cad310793e380f6e511306d1c8758737cccce3c7b2ee6284d"
   },
   "agent/formal_controller.py": {
-    "bytes": 18982,
+    "bytes": 20222,
     "mode": 420,
-    "sha256": "762ab8a4f36183fd973ffb3cf2f2e1586c7b4db547da0f2ca5b2ad74b835b428"
+    "sha256": "c3c463d4ecebc1193a6e1e9017653699b92b251d1e8518a3dad61d2262dbf5cd"
   },
   "agent/formal_entry.py": {
     "bytes": 6401,
@@ -105,9 +105,9 @@
     "sha256": "8a187bdb3a234a9156858b2abf7316069a09cba1f8923934e7e5c9c3ebc065cd"
   },
   "agent/native_model.py": {
-    "bytes": 14966,
+    "bytes": 15017,
     "mode": 420,
-    "sha256": "84ba95fae253b43d9e19ef568d05778108755e84d361ea2d27d491db087ac5d7"
+    "sha256": "0c810f0420758018496887d010be39205264ebd2b2f85bf044d16beb657db322"
   },
   "agent/native_runtime.py": {
     "bytes": 16750,
@@ -130,9 +130,9 @@
     "sha256": "8dbc105a96cc275b97dec2750207d8e07febe803849f1c1b71dcfb31a5b6a38d"
   },
   "agent/prompt_builder.py": {
-    "bytes": 9616,
+    "bytes": 11997,
     "mode": 420,
-    "sha256": "b7efc400f407c6d6c1fdd0017b3888af26a1a89f28e7a08f89fcec5f7f7f170c"
+    "sha256": "3fc5372c2acd4b67d90aac871998a1365a17c92d4ebb5861383042491178d7f2"
   },
   "agent/release_integrity.py": {
     "bytes": 3305,
@@ -140,9 +140,9 @@
     "sha256": "f8a756009e7060af87d3ec0fce617294580026be2c52ca437731d2fe5c64d158"
   },
   "agent/route_adapter.py": {
-    "bytes": 4995,
+    "bytes": 5729,
     "mode": 420,
-    "sha256": "7297138fb826abfca935cc0007d163d64d51f9721f68a8194bcc7f394f4303f3"
+    "sha256": "c978660c817a4e6d9b204611292f3b0f43be242a4abc02b0ef6389ad11f324dd"
   },
   "agent/rtl_delivery.py": {
     "bytes": 6196,
@@ -195,9 +195,9 @@
     "sha256": "fafa157e337b74a29736984beb6b6b7dedce587f1d3ef981e10cf721ff01e9f0"
   },
   "manifest.json": {
-    "bytes": 1909,
+    "bytes": 1970,
     "mode": 420,
-    "sha256": "f6914a85e16658e306779757965bdc9e89cca720e720acfa793270179a278277"
+    "sha256": "464f7f8c273b48620d3f7721f9cc96f69f2059a298c82bf5d691063ffd2d9640"
   },
   "model/MODEL.md": {
     "bytes": 1437,
@@ -240,9 +240,9 @@
     "sha256": "c5b7c3f5d67eb08230e28e08e2fac5a38a997812abf63ec2d20880b38680f898"
   },
   "skill/README.md": {
-    "bytes": 969,
+    "bytes": 1375,
     "mode": 420,
-    "sha256": "43a379c7a98b3ac3685fa1985d8503048b9abf54d228f6b8e2470f78e03b49e2"
+    "sha256": "db041799757fe3e0ef7085c703b118ce51d9f6b917de58ad8d4db83417164943"
   },
   "skill/knowledge/ROOT.md": {
     "bytes": 723,
@@ -285,9 +285,9 @@
     "sha256": "dc16224311049eabe94e9907b9f7f7a717ee1c6b34f535d591ae23c68c6d992c"
   },
   "skill/prompt-inputs.lock.json": {
-    "bytes": 1407,
+    "bytes": 1408,
     "mode": 420,
-    "sha256": "f29b9e9733f7418e2d24b354be270039282084b81181cd93a6f6e931512063b1"
+    "sha256": "d804f874a9bd851ec8ab8f58edc95350c62d74514442957cd430059474c20ea0"
   },
   "tools/check_release.py": {
     "bytes": 933,

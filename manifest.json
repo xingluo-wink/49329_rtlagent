@@ -55,7 +55,8 @@
     "deadline_s": 900,
     "stage_thinking_overrides": false,
     "route_output_cap": 4096,
-    "other_output_cap": 16384
+    "other_output_cap": 16384,
+    "routing_policy": "optional_cards_or_baseline_messages"
   },
   "acceptance": {
     "packaged_runtime_tested": false,
@@ -63,5 +64,5 @@
     "model_benefit_verified": false
   },
   "team_id": "49329",
-  "release": "1.0.0"
+  "release": "1.0.1"
 }

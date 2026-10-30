@@ -191,7 +191,7 @@ class NativeModel:
     def generate(self, *, payload, context, permit):
         stage = context['request_id'].rsplit('.', 1)[-1]
         require(stage in ('route','initial','compiler_repair'), 'unknown stage')
-        end = min(context['deadline_monotonic']-90., self.clock()+(180. if stage=='route' else 540. if stage=='initial' else 720.))
+        end = min(context['deadline_monotonic']-90., self.clock()+(180. if stage=='route' else (840. if context.get('solve_mode')=='direct' else 540.) if stage=='initial' else 720.))
         self.guard(end); require(self.idle(end=end), 'model busy before claim')
         folder = self.root/context['request_id']; folder.mkdir(exist_ok=False)
         put(folder/'request.json', payload)
