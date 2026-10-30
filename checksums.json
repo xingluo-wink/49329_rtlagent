@@ -20,14 +20,14 @@
     "sha256": "134a2c1f1c06e1a2d9a31cc154d258a544f21b126546eb85f324b1378d20738e"
   },
   "README.md": {
-    "bytes": 5042,
+    "bytes": 5234,
     "mode": 420,
-    "sha256": "fce42f6e5e41ec4cbb7e0303f5b6e6a5964eeb565f2a25f260acb9bdffa8e7ee"
+    "sha256": "26748a53a05f9e7192a888294e230ede12ab985c4fa9357115ca14942e228657"
   },
   "REPORT.md": {
-    "bytes": 17079,
+    "bytes": 21090,
     "mode": 420,
-    "sha256": "f5bde71c53d2f2125db7d6ff589d6e1a9fbfd2107b1ef8fa711aa6418f2f624f"
+    "sha256": "07263c9736430a411a284bb839c1472c1b16618b2910fb764ec6ff3bf0f1a4b5"
   },
   "agent/adapter_contracts.py": {
     "bytes": 15506,
@@ -210,9 +210,14 @@
     "sha256": "ea15c62880fa5bd0043acc2a478a51e98037fd5d42ddaaf5867019485ea0d713"
   },
   "docs/QUICKSTART.md": {
-    "bytes": 2839,
+    "bytes": 4736,
     "mode": 420,
-    "sha256": "0e6f49d8edff72706c730aceb0b10195a3903463d18e9f7eb25370aa208a9c03"
+    "sha256": "a6aed8b4c85496ee1b143fc21c6cdee631eefe51709f25abdabde8e0ec7d8c66"
+  },
+  "docs/SUBMISSION.md": {
+    "bytes": 2589,
+    "mode": 420,
+    "sha256": "deb930c2a6296df55ad3d0a7c8e12ff4d954e53438e9aa6970ea651b43998ba3"
   },
   "examples/popcount8/prompt.txt": {
     "bytes": 414,
@@ -255,14 +260,14 @@
     "sha256": "fafa157e337b74a29736984beb6b6b7dedce587f1d3ef981e10cf721ff01e9f0"
   },
   "manifest.json": {
-    "bytes": 1970,
+    "bytes": 2377,
     "mode": 420,
-    "sha256": "464f7f8c273b48620d3f7721f9cc96f69f2059a298c82bf5d691063ffd2d9640"
+    "sha256": "e4ae321c56d78e3982774683ca084ae16d1faf3f10e78b55c109d83545de1669"
   },
   "model/MODEL.md": {
-    "bytes": 1437,
+    "bytes": 1671,
     "mode": 420,
-    "sha256": "261282218edaa20d65f4f93b720bb5ceb643c3d1d4b42e731ed8b3f2c9129d1e"
+    "sha256": "110f79a665d8afc30cb4a99fb6936d6e7636e90d8bb458e53944d16e71c23ba4"
   },
   "model/model-runtime-lock.json": {
     "bytes": 3435,
@@ -290,9 +295,9 @@
     "sha256": "5c46c40d32c0cf4c4e1dc52ae12e60f8396a0deccafaa4e6f69d7316a3482e75"
   },
   "selftest/README.md": {
-    "bytes": 9239,
+    "bytes": 1641,
     "mode": 420,
-    "sha256": "fcc8c04ccbd79102d70a7e305df3f2610f80536d8a0464d24d8601ae983e8316"
+    "sha256": "e3eea5a427cb84ae4ab8273c98970e9aab1586f53ace57e885eadcf2150d1dcc"
   },
   "selftest/env.sh.example": {
     "bytes": 2868,
@@ -325,9 +330,9 @@
     "sha256": "320089d096fa161921644feb205cc4e11a9a7da52f9669a78cf719fff000747c"
   },
   "selftest/run_selftest.sh": {
-    "bytes": 6218,
+    "bytes": 696,
     "mode": 493,
-    "sha256": "05009f5daa41567bbdcb5f3cb91b81d667b6b9b902f8582288e949f6b0d5200f"
+    "sha256": "d55223dc41a76e0b912e3f1bbd8d164d1abeeea7cee1df64353a495e5800f554"
   },
   "selftest/score.py": {
     "bytes": 8492,

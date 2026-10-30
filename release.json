@@ -1,10 +1,10 @@
 {
   "schema": "rtl-source-release-v1",
-  "version": "1.0.4",
-  "file_count": 85,
-  "checksums_sha256": "250cd3e47705275333f48d23cd7950794648e700823a2259268327c501daa73c",
+  "version": "1.0.5",
+  "file_count": 86,
+  "checksums_sha256": "b64ec7443dfebf56904e5702ed670819a449b867f63358805e31732938b8137d",
   "package_approved": true,
   "runtime_tested": false,
   "formal_submission_ready": false,
-  "note": "Source consistency is separate from the recorded deployment acceptance."
+  "note": "Source publication; startup and external health evidence are recorded separately. No solve/grade acceptance was run in this publication."
 }

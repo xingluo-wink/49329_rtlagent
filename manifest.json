@@ -9,10 +9,18 @@
     "quantization": "UD-Q4_K_M",
     "weight_sha256": "ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61",
     "weight_bytes": 22134528992,
-    "measured_vram_gb": null,
+    "measured_vram_gb": 22.992,
     "finetuned": false,
     "finetune_weights_url": null,
-    "base_model_source": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B"
+    "base_model_source": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
+    "memory_measurement": {
+      "scope": "previous same-weight loaded idle service; not peak or physical 32GB-card acceptance",
+      "observed_utc": "2026-10-30T14:52:45Z",
+      "vram_bytes": 22991556608,
+      "physical_total_bytes": 51522830336,
+      "runtime_sha256": "e712c97b1c3bf4b8d2f3cb31813762e6c7349b8f57564be132290f758ab3dcf6",
+      "final_service_current_value": "GET /v1/health"
+    }
   },
   "auxiliary_models": [],
   "context": {
@@ -64,5 +72,5 @@
     "model_benefit_verified": false
   },
   "team_id": "49329",
-  "release": "1.0.1"
+  "release": "1.0.5"
 }

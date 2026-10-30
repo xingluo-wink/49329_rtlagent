@@ -15,7 +15,8 @@
 | `serve/run_api.sh` | 开启赛事的鉴权投题接口，转交给同一引擎 |
 | `run.sh` | 读取题目目录，输出 RTL 和执行记录 |
 | `baseline.py`、`run_baseline.sh` | 保持原字节的官方单次调用基线 |
-| `docs/QUICKSTART.md` | 从打开终端到完整跑通一道题的操作步骤 |
+| `docs/QUICKSTART.md` | 自己读文件做题、查看结果和正式开服的步骤 |
+| `docs/SUBMISSION.md` | 代码封存、仓库访问和公网投题的提交清单 |
 | `tools/demo.py` | 自动运行官方计数示例并显示官方自测判分 |
 | `REPORT.md` | 技术报告及本人待填写的位置 |
 | `tools/check_release.py` | 只读检查分发文件、知识卡、模型声明和基线一致性 |
@@ -35,7 +36,7 @@ python3 tools/demo.py
 
 当前源码策略只接受单个、大小写精确为 `TopModule` 的模块；其他模块名或多模块属于策略拒绝，不会冒充编译失败再补请求。
 
-`run_baseline.sh` 直接执行官方单次调用实现；与 Agent 测试时保持串行，不要绕过 API 的队列同时请求模型。常驻服务只由 `serve/start.sh` 启动，`run.sh` 不另起模型。
+`run_baseline.sh` 直接执行官方单次调用实现；与 Agent 使用时保持串行，不要绕过 API 的队列同时请求模型。常驻服务只由 `serve/start.sh` 启动，`run.sh` 不另起模型。`selftest/run_selftest.sh`只运行一个公开示例，不会自动启动全题库或重复采样。
 
 ## 接口和边界
 
