@@ -1,0 +1,39 @@
+{
+  "schema": "v19-r3-prompt-inputs-v1",
+  "knowledge": {
+    "knowledge/ROOT.md": {
+      "sha256": "dfd29c8ec43b47fa3aa20af301ca42f2dc3498717aaa0550d8abd7ea07742f2e",
+      "bytes": 723
+    },
+    "knowledge/catalog.json": {
+      "sha256": "6e83261c5d2b4197da0e9a2496e6ff122919f434cc75adb2533664b065ee5036",
+      "bytes": 898
+    },
+    "knowledge/edge_state.md": {
+      "sha256": "14f9506a8c8aa8f0a627a8c6199f602846131a874c53f86e5886e069024085ef",
+      "bytes": 718
+    },
+    "knowledge/event_history.md": {
+      "sha256": "97f2cc2cabfcf5fca7c89f5383fe36e29f5fce5b910ca3417e144e689dde8f72",
+      "bytes": 204
+    },
+    "knowledge/handshake.md": {
+      "sha256": "695f6e5ca625cbad78a71684cd21520603edab273a0ed341cfc6a19ee9bdcace",
+      "bytes": 281
+    },
+    "knowledge/lifecycle.md": {
+      "sha256": "5ec728ff7c52c27f1f5343c5b984614d179c532ce8cdb305c6a3fa80aaba53d7",
+      "bytes": 306
+    },
+    "knowledge/numeric_range.md": {
+      "sha256": "6840b66c76316172649337804b9180a1062dc352860d7ad0b432c5622e17e690",
+      "bytes": 2007
+    },
+    "knowledge/rolling_window.md": {
+      "sha256": "dc16224311049eabe94e9907b9f7f7a717ee1c6b34f535d591ae23c68c6d992c",
+      "bytes": 213
+    }
+  },
+  "route_adapter_source_sha256": "7297138fb826abfca935cc0007d163d64d51f9721f68a8194bcc7f394f4303f3",
+  "route_system_utf8_sha256": "617588079515c42c9f8ee40e1f7f64d78f52ee6407d1b0267dee0a8778038ed5"
+}

@@ -1,0 +1,3 @@
+# The inference and EDA stack is supplied by the pinned competition image.
+# Install Python packages before entering the offline evaluation environment.
+uvicorn>=0.29,<1

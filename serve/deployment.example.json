@@ -1,0 +1,7 @@
+{
+  "hostname": "REPLACE-WITH-VERIFIED-HOSTNAME",
+  "boot_id": "00000000-0000-0000-0000-000000000000",
+  "execution_ids": [0, 0, 0, 0],
+  "workspace_owner": [65534, 65534],
+  "persistent_root": "/workspace/competition-validation-20261019"
+}

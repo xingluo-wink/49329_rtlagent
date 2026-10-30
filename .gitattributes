@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+agent/route_adapter.py -text
+skill/knowledge/catalog.json -text
+licenses/official-reference.txt -text

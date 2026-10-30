@@ -1,0 +1,16 @@
+.git
+__pycache__
+*.pyc
+.env*
+*.local.json
+*token.env
+*.pem
+*.key
+*.lic
+*.gguf
+*.safetensors
+state
+runs
+outputs
+logs
+scratch

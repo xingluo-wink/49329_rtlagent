@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "track": "rtl",
+  "model": {
+    "name": "Qwen/Qwen3.6-35B-A3B",
+    "source": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF",
+    "quant_repo": "unsloth/Qwen3.6-35B-A3B-GGUF",
+    "revision": "a483e9e6cbd595906af30beda3187c2663a1118c",
+    "quantization": "UD-Q4_K_M",
+    "weight_sha256": "ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61",
+    "weight_bytes": 22134528992,
+    "measured_vram_gb": null,
+    "finetuned": false,
+    "finetune_weights_url": null,
+    "base_model_source": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B"
+  },
+  "auxiliary_models": [],
+  "context": {
+    "max_model_len": 32768,
+    "max_output_tokens": 16384,
+    "rope_scaling": null
+  },
+  "generation": {
+    "chat_template_kwargs": {
+      "enable_thinking": true
+    }
+  },
+  "serving": {
+    "backend": "llama.cpp",
+    "version": "b1-f114f91",
+    "alias": "qwen36-35b-a3b",
+    "backend_sha256": "290708d22f8b495d36b8aedd0afb0cdc081c415548f855e6a950a75dd742ad97",
+    "runtime_sha256": "51d3bd1a685ca79f64259de6f9cab5cbfd7d3f3d69b99bc27fea3e207c947669",
+    "template_sha256": "55d4931433fe502b794226ee7f4d206a6bdd436ac9f80eb7d8ebb4c639f9ea0c",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "port": 8000,
+    "parallel_slots": 1,
+    "runtime_accepted": false,
+    "start_command": "./serve/start.sh"
+  },
+  "endpoints": {
+    "solve": "./run.sh",
+    "baseline": "./run_baseline.sh",
+    "http_port": 7860
+  },
+  "agent": {
+    "max_rounds": 3,
+    "tools": [
+      "xvlog_frontend"
+    ],
+    "skills": [
+      "ROOT",
+      "at_most_two_exact_leaves"
+    ],
+    "deadline_s": 900,
+    "stage_thinking_overrides": false,
+    "route_output_cap": 4096,
+    "other_output_cap": 16384
+  },
+  "acceptance": {
+    "packaged_runtime_tested": false,
+    "formal_submission_ready": false,
+    "model_benefit_verified": false
+  },
+  "team_id": "49329",
+  "release": "1.0.0"
+}

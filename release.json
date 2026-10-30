@@ -1,0 +1,12 @@
+{
+  "checksums_scope": "initial distribution bytes; REPORT.md is editable UTF-8 text, not runtime input",
+  "checksums_sha256": "90ec4907a77fee2548db1693fc70488c47ab74355d5e4120212a3e687d22bcba",
+  "editable_documents": [
+    "REPORT.md"
+  ],
+  "file_count": 59,
+  "package_approved": true,
+  "release": "1.0.0",
+  "runtime_tested": false,
+  "schema": "rtl-source-release-v1"
+}
