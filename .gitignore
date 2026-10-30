@@ -29,3 +29,8 @@ wheelhouse/
 *.tmp
 *.pid
 AGENTS.md
+
+/docs/QUICKSTART.md
+/docs/SUBMISSION.md
+/handoff/
+/submission-materials/

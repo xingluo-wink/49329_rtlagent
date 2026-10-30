@@ -1,59 +1,55 @@
 # RTL Agent
 
-把硬件题面的文字要求转换成完整 SystemVerilog 模块。系统先判断知识卡是否适用：有直接相关的卡才使用；没有合适的卡，就按官方基线的提示方式直接读题写代码。只有确实执行过的编译失败，才允许一次有界修复。对外提供赛事规定的文件入口和带鉴权的异步投题 API。
+面向 RTL 赛道的本地代码生成系统。根据题面选择零至两张相关知识卡，生成完整 SystemVerilog 模块；仅对有效编译失败执行一次有界修复。未选择知识卡时，使用官方基线的系统提示和原始题面直接生成。
 
-解题模型为 **Qwen3.6-35B-A3B / UD-Q4_K_M**。Agent 与官方基线共用同一模型、32768 上下文和 thinking 设置。系统没有训练或微调权重。
+模型为 Qwen3.6-35B-A3B / UD-Q4_K_M。Agent 与基线共用同一模型、32768 上下文和 thinking 配置。模型来源、权重 revision、SHA-256 和依赖见 [model/MODEL.md](model/MODEL.md)。
 
-## 目录
+## 文件接口
 
-| 路径 | 用途 |
-| --- | --- |
-| `agent/` | 接题、排队、知识路由、生成、编译、进程管理和交付 |
-| `skill/` | 实际使用的通用知识卡和内容校验清单 |
-| `model/` | 模型说明、权重与运行参数锁 |
-| `serve/start.sh` | 后台启动模型和本地解题引擎，等待就绪 |
-| `serve/run_api.sh` | 开启赛事的鉴权投题接口，转交给同一引擎 |
-| `run.sh` | 读取题目目录，输出 RTL 和执行记录 |
-| `baseline.py`、`run_baseline.sh` | 保持原字节的官方单次调用基线 |
-| `docs/QUICKSTART.md` | 自己读文件做题、查看结果和正式开服的步骤 |
-| `docs/SUBMISSION.md` | 代码封存、仓库访问和公网投题的提交清单 |
-| `tools/demo.py` | 自动运行官方计数示例并显示官方自测判分 |
-| `REPORT.md` | 技术报告及本人待填写的位置 |
-| `tools/check_release.py` | 只读检查分发文件、知识卡、模型声明和基线一致性 |
-
-## 运行前需要什么
-
-使用锁定的赛事 Linux 镜像、Python 3.11 以上、Uvicorn、对应 ROCm 的 llama.cpp、Vivado 2026.1 和可用许可证。模型文件应提前放到 `model/model-runtime-lock.json` 指定路径；启动时校验大小、SHA-256、后端二进制和实际模型属性。程序不会下载权重或安装依赖。
-
-首次使用请看 [跑通一道题](docs/QUICKSTART.md)。文件入口不需要赛事令牌，也不需要手填主机身份。依赖和权重已准备好后，执行：
+依赖与权重准备完成后，在仓库根目录执行：
 
 ```bash
 bash serve/start.sh
-python3 tools/demo.py
+bash run.sh /path/to/input /path/to/empty-output
 ```
 
-输入目录必须有 `prompt.txt`，可选 `interface.txt`。官方题面的接口通常已经写在 prompt 中，此时不需要另建 interface。输出目录须为空，正常结束后查看 `solution.v` 和 `trace.jsonl`。不要把生成了文件理解成通过功能评分。
+输入目录包含 `prompt.txt` 和可选的 `interface.txt`；输出为 `solution.v` 与 `trace.jsonl`。`run.sh` 调用 `agent/main.py`，由同一个常驻引擎完成读取、排队、生成与交付。基线入口为 `run_baseline.sh INPUT_DIR OUTPUT_DIR`，保留官方原始实现，须与 Agent 串行运行。
 
-当前源码策略只接受单个、大小写精确为 `TopModule` 的模块；其他模块名或多模块属于策略拒绝，不会冒充编译失败再补请求。
+## HTTP 接口
 
-`run_baseline.sh` 直接执行官方单次调用实现；与 Agent 使用时保持串行，不要绕过 API 的队列同时请求模型。常驻服务只由 `serve/start.sh` 启动，`run.sh` 不另起模型。`selftest/run_selftest.sh`只运行一个公开示例，不会自动启动全题库或重复采样。
+```bash
+bash serve/run_api.sh start
+```
 
-## 接口和边界
+服务绑定 `127.0.0.1:7860`，使用环境变量 `FPGACHINA_TOKEN` 或 `FPGACHINA_TOKEN_FILE` 指定的私有文件进行鉴权。模型服务仅监听 `127.0.0.1:8000`。
 
-`start.sh` 启动本地 Unix socket 引擎；`run.sh` 或 `python3 tools/solve.py 题目目录` 读取文件、调用该引擎、保存答案。另执行 `bash serve/run_api.sh start` 后，投题接口监听 `127.0.0.1:7860`；模型只监听 `127.0.0.1:8000`。无令牌访问公网健康接口返回 401；带令牌返回 200 且 `ready: true`，才表示可接题。`POST /v1/solve` 返回 202 与 job_id，再用 `GET /v1/jobs/<job_id>` 查询结果。两个入口共享串行队列，不会同时执行两道题。
+| 接口 | 返回内容 |
+| --- | --- |
+| `GET /v1/health` | 模型、赛道、就绪状态和显存观测 |
+| `POST /v1/solve` | HTTP 202 与任务编号，支持 agent / baseline |
+| `GET /v1/jobs/<job_id>` | 任务状态、完成后的代码及执行记录 |
 
-单题总时限为 900 秒，包含排队。Agent 最多三次模型尝试：路由、首稿、一次符合条件的编译修复。路由选择零张卡，或已确认正常关闭的路由回复为空、格式不可用时，仍进入首稿生成，不再因为选卡环节丢掉整题。直接解题时只发送原始题面、接口和官方基线的系统提示，不添加知识卡或路由短答；路由本身花费的时间仍计入总时限。
+文件接口与 HTTP 接口共享串行队列。单题总预算为900秒，包含排队时间；相同 nonce 不重复执行。部署参数、状态目录和生命周期说明见 [docs/OPERATING.md](docs/OPERATING.md)。
 
-首稿空正文、策略拒绝或工具未知不会获得额外补发。路由传输未关闭、配置校验失败或预算已耗尽时也不会强行继续；已经提交但结果未知的请求不能直接重放。
+## 目录
 
-本系统的内部编译检查只使用 xvlog 前端，不等于完整功能仿真、综合通过或正式成绩。全量配对评分、部署环境重建及资源验收应以对应实际结果为准；打包与文件检查不代替这些验证。
+| 路径 | 内容 |
+| --- | --- |
+| `agent/` | 解题控制器、模型适配器、编译适配器与服务 |
+| `skill/` | 知识目录、卡片与内容锁 |
+| `model/` | 模型说明和运行参数锁 |
+| `serve/` | 引擎、模型与 HTTP 服务入口 |
+| `tools/` | 单题文件工具、公开示例与分发检查 |
+| `selftest/` | 官方自测判定器 |
+| `examples/` | 公开示例题面及独立判分材料 |
+| `licenses/` | 第三方来源与许可 |
 
-## 报告填写
+## 约束
 
-`REPORT.md` 中的 U 编号由本人填写实际经历和协作记录，D 编号等待真实测试或部署证据。随交付材料提供的填写索引可直接定位这些位置。报告是唯一允许补写的文档，补写不会改变运行输入或放宽源码、知识卡及模型的校验；其他分发文件仍按校验清单核对。
+Agent 最多进行路由、首稿和一次有效编译修复，共三次模型尝试。空正文、源码策略拒绝或工具未知不触发额外修复。当前源码策略只接受一个大小写精确为 `TopModule` 的模块。内部编译采用 xvlog 前端，不代表功能仿真或综合通过。
 
-正式提交前应完成必要字段、检查匿名性和页数，移除占位符。内部填写表和联系人记录不属于匿名报告。
+`python3 tools/check_release.py` 只检查分发文件、模型声明、知识锁和官方基线的一致性，不运行解题任务。公开示例的独立判分入口见 [selftest/README.md](selftest/README.md)。参考实现和测试台不进入模型提示。
 
 ## 来源与许可
 
-官方基线、自测判定器和公开示例来自 [rtlagent2026](https://gitee.com/Vickyiii/rtlagent2026)，相关许可证见 `licenses/`。`examples/` 的参考实现与测试台只用于独立判分，解题端只读取 prompt.txt 与可选 interface.txt。模型按其独立许可证使用。本仓库不包含模型权重、令牌、比赛隐藏题、运行日志或开发会话。
+官方基线、自测判定器与公开示例来自 [rtlagent2026](https://gitee.com/Vickyiii/rtlagent2026)，许可证见 `licenses/`。模型及运行工具分别遵循各自许可证。仓库不包含权重、令牌、私钥、运行日志或生成结果。

@@ -10,9 +10,9 @@
     "sha256": "8edf704c1372acc88056ad610966f4f35bff09f11aa4e1eb8406eb273e9ac447"
   },
   ".gitignore": {
-    "bytes": 254,
+    "bytes": 328,
     "mode": 420,
-    "sha256": "e7324e836974d5b7c86032c634aed910a2e8677a0ce39e2d3719b6ec01618cdf"
+    "sha256": "9bfdb10321c4965476519daccf64ff74f8b919a22c556e3c16bce2b701679fbe"
   },
   "Dockerfile": {
     "bytes": 1321,
@@ -20,14 +20,14 @@
     "sha256": "134a2c1f1c06e1a2d9a31cc154d258a544f21b126546eb85f324b1378d20738e"
   },
   "README.md": {
-    "bytes": 5234,
+    "bytes": 3024,
     "mode": 420,
-    "sha256": "26748a53a05f9e7192a888294e230ede12ab985c4fa9357115ca14942e228657"
+    "sha256": "32c29d5b2e556ff1962b212768fd9b66b551fc4c78f23d0ce2e8434cf833b930"
   },
   "REPORT.md": {
-    "bytes": 21090,
+    "bytes": 25,
     "mode": 420,
-    "sha256": "07263c9736430a411a284bb839c1472c1b16618b2910fb764ec6ff3bf0f1a4b5"
+    "sha256": "2275c1e40db4512741c0ad27093d67e39e8065730c6fd3b2b9dcf75dd8abeffd"
   },
   "agent/adapter_contracts.py": {
     "bytes": 15506,
@@ -205,19 +205,9 @@
     "sha256": "17aaa609d4dbd36a94d1390e39f769394448f8588f3ccdd2bd37db9e34ed05e2"
   },
   "docs/OPERATING.md": {
-    "bytes": 4169,
+    "bytes": 2520,
     "mode": 420,
-    "sha256": "ea15c62880fa5bd0043acc2a478a51e98037fd5d42ddaaf5867019485ea0d713"
-  },
-  "docs/QUICKSTART.md": {
-    "bytes": 4736,
-    "mode": 420,
-    "sha256": "a6aed8b4c85496ee1b143fc21c6cdee631eefe51709f25abdabde8e0ec7d8c66"
-  },
-  "docs/SUBMISSION.md": {
-    "bytes": 2589,
-    "mode": 420,
-    "sha256": "deb930c2a6296df55ad3d0a7c8e12ff4d954e53438e9aa6970ea651b43998ba3"
+    "sha256": "0bad71a654579896cfdb4cb1d0bdce626f3054b8cceadf640d6f615bb0f9c12f"
   },
   "examples/popcount8/prompt.txt": {
     "bytes": 414,
@@ -295,9 +285,9 @@
     "sha256": "5c46c40d32c0cf4c4e1dc52ae12e60f8396a0deccafaa4e6f69d7316a3482e75"
   },
   "selftest/README.md": {
-    "bytes": 1641,
+    "bytes": 985,
     "mode": 420,
-    "sha256": "e3eea5a427cb84ae4ab8273c98970e9aab1586f53ace57e885eadcf2150d1dcc"
+    "sha256": "7248a71b4c3ee870225188e77522b065450e0eba33ad52e7d58798e9e712a2e1"
   },
   "selftest/env.sh.example": {
     "bytes": 2868,
