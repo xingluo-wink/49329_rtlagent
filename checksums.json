@@ -110,9 +110,9 @@
     "sha256": "9c1f64a0d2e582a1f55d401ebff960ec5f10fa284e5d5357a1c9e4881092a58a"
   },
   "agent/main.py": {
-    "bytes": 146,
+    "bytes": 186,
     "mode": 420,
-    "sha256": "17c65f07bc3aeb8be4b02af20169e6046593bb0b3760678c7cf77cb36dd965b2"
+    "sha256": "2db36de61127e57c472a7fce7fa275f7fff14399a05b3719801774d79cab95ae"
   },
   "agent/native_baseline.py": {
     "bytes": 9388,
@@ -410,18 +410,18 @@
     "sha256": "8e42f5db79cbf2189d9368525726149a91e34d41c2c88a609211532f0011377c"
   },
   "tools/demo.py": {
-    "bytes": 990,
+    "bytes": 1019,
     "mode": 420,
-    "sha256": "d2ddb2569845d8a959b86d2ac02437cfe3180e7921cf94c1f7e35bf1f5849a97"
+    "sha256": "1b7e5221b400c883ac29156c5bcf279bda4877a319ff6640c3d51c0e67e1e9ff"
   },
   "tools/grade.py": {
-    "bytes": 3545,
+    "bytes": 3574,
     "mode": 420,
-    "sha256": "fbb183386ebf3a25a1f339cd3e51b5f00b60f194a9b8c917523a723585436346"
+    "sha256": "35f1df6b4575f361401edbab69af5bbf462a76c3e1d1f5236abee5bf39260f80"
   },
   "tools/solve.py": {
-    "bytes": 808,
+    "bytes": 837,
     "mode": 420,
-    "sha256": "a662af50945ec9c00ce1af858117e0263161736c5b32c33d3d4e9ab5f7304ed6"
+    "sha256": "4eb12345e8ae25b85b584c3ecbeb48c463bdcb58b49e2942938bba37ce775f09"
   }
 }

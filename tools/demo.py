@@ -1,5 +1,6 @@
 """One complete public example, using the real file entry and official judge."""
 import subprocess,sys,tempfile
+sys.dont_write_bytecode=True
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(ROOT/'agent'))

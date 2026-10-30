@@ -1,5 +1,6 @@
 """Human-friendly file entry; the official run.sh uses the same Python code."""
 import argparse,sys,tempfile
+sys.dont_write_bytecode=True
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(ROOT/'agent'))

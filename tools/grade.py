@@ -1,5 +1,6 @@
 """Run the unchanged official judge on a task with public test fixtures."""
 import argparse,json,os,sys,time
+sys.dont_write_bytecode=True
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(ROOT/'agent'))

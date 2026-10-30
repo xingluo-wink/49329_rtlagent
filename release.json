@@ -1,8 +1,8 @@
 {
   "schema": "rtl-source-release-v1",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "file_count": 85,
-  "checksums_sha256": "587ee42b92870de9210514c809fbb8f9c26b6f79f5950480ed8e8b305ba14cea",
+  "checksums_sha256": "250cd3e47705275333f48d23cd7950794648e700823a2259268327c501daa73c",
   "package_approved": true,
   "runtime_tested": false,
   "formal_submission_ready": false,
