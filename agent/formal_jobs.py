@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import time
+import threading
 import uuid
 from adapter_contracts import BoundaryError, require, finite
 from artifact_store import _publish
@@ -19,6 +20,10 @@ from generation_policy import GenerationPolicy
 from baseline_bridge import run_baseline,validate_reply,BaselineReply,invocation_spec,registry_manifest
 from host_completion import Identity, ExitObserver
 from compiler_repair import ArtifactReader
+
+# All admissions and dispatch claims belong to the single engine process.
+# The lock only covers file state transitions, never a model/tool operation.
+TRANSITIONS = threading.RLock()
 
 
 class Conflict(BoundaryError): pass
@@ -31,6 +36,14 @@ def put(path, value):
     with Path(path).open('xb') as f:
         f.write(raw); f.flush(); os.fsync(f.fileno())
     return {'sha256': digest(raw), 'bytes': len(raw)}
+
+
+def commit(path,value):
+    """Readers see either no marker or the complete, flushed marker."""
+    path=Path(path);pending=path.with_name(path.name+'.pending-'+uuid.uuid4().hex)
+    result=put(pending,value)
+    _publish(pending,path)
+    return result
 
 
 def read(path, limit=4*1024*1024):
@@ -129,7 +142,7 @@ class JobStore:
                 'automatic_resume':False,'runtime_accepted':False}
         put(p/'ticket.json',ticket)
         # A partial directory or missing ready receipt is never dispatchable.
-        put(p/'queued.json', {'ticket_sha256':digest(canonical(ticket))})
+        commit(p/'queued.json', {'ticket_sha256':digest(canonical(ticket))})
         return self.status(job_id)
 
     def ticket(self, job_id):
@@ -156,13 +169,16 @@ class JobStore:
 
     def status(self, job_id):
         p=self.job(job_id);ticket=self.ticket(job_id)
+        if (p/'failure-final.json').exists():
+            from failure_delivery import read_failure
+            return read_failure(p,ticket,read)
         out={'job_id':job_id,'task_id':ticket['binding']['request']['task_id'],'status':'queued','runtime_accepted':False}
         if (p/'final.json').exists():
             final=strict_json(read(p/'final.json'));out['status']=final['status']
             require(final['job_id']==job_id and final['ticket_sha256']==digest(canonical(ticket)), 'final ticket binding')
             launch=strict_json(read(p/'launch-intent.json'));raw=read(p/'launcher-receipt.json')
             require(digest(raw)==final['launcher_receipt_sha256'] and launch['lease_id']==final['lease_id'], 'final closure binding')
-            worker,output=validate_closure(p,ticket,launch,raw,self.clock())
+            worker,output=validate_closure(p,ticket,launch,raw,final['published_at_monotonic'])
             published=final['published_at_monotonic'];observed=strict_json(raw)['observed_at_monotonic']
             require(final['status'] in ('done','closed_late') and finite(published) and published>=observed,
                     'final publication state/time invalid')
@@ -341,8 +357,15 @@ class ObservedLauncher:
             put(job/'worker-spawned.json',report)
             observer=ExitObserver(process,Identity(identity['pid'],identity['start_ticks'],identity['boot_id']),clock=self.clock)
             observer.start()
-            remaining=max(0.,ticket['deadline_monotonic']-self.clock())
-            joined=observer.join(remaining)
+            joined=False
+            # Leave ten seconds for termination, backend idle and publication.
+            # Cancellation never extends the original admission clock.
+            stop_at=max(ticket['queued_at_monotonic'],ticket['deadline_monotonic']-10.)
+            while self.clock()<stop_at and not (job/'cancel-requested.json').exists() and (
+                    not hasattr(self.platform,'client_alive') or self.platform.client_alive(job)):
+                if observer.join(min(.2,max(0.,stop_at-self.clock()))):
+                    joined=True;break
+            report['stop_reason']=None if joined else ('cancelled' if (job/'cancel-requested.json').exists() else 'deadline_or_client_exit')
             # An elapsed deadline is not proof of exit. Only the platform's
             # identity-bound close operation may terminate an owned process.
             rows=self.platform.close_owned(process,identity,terminate=not joined)
@@ -505,7 +528,9 @@ class Dispatcher:
             previous=dirs[-1]
             if not (previous/'released.json').exists(): raise Busy('earlier worker closure remains unknown')
             released=strict_json(read(previous/'released.json')); prior=strict_json(read(previous/'claimed.json'))
-            final_path=self.store.job(prior['job_id'])/'final.json'
+            name=released.get('final_file','final.json')
+            require(name in ('final.json','failure-final.json'),'lease final file')
+            final_path=self.store.job(prior['job_id'])/name
             require(released['final_sha256']==digest(read(final_path)) and released['lease_id']==previous.name, 'lease release not bound to final evidence')
             require(self.store.status(prior['job_id'])['status'] in ('done','closed_late'), 'prior closure evidence no longer valid')
         lease=root/('%08d'%(len(dirs)+1))
@@ -517,17 +542,19 @@ class Dispatcher:
 
     def dispatch(self,job_id):
         s=self.store;p=s.job(job_id);ticket=s.ticket(job_id)
-        if (p/'launch-intent.json').exists() or (p/'expired.json').exists():return s.status(job_id)
-        same_clock(ticket['enqueue_clock_domain'],s.domain)
-        now=s.clock();require(finite(now) and now>=ticket['queued_at_monotonic'], 'queue clock regression')
-        if now>=ticket['deadline_monotonic']:
-            put(p/'expired.json',{'status':'expired_not_started','model_requests':0,'worker_spawned':False})
-            return s.status(job_id)
-        if not self.launcher.available:raise Unavailable('no accepted native launcher/model adapter')
-        lease=self._lease(ticket)
-        launch={'job_id':job_id,'ticket_sha256':digest(canonical(ticket)),'lease_id':lease.name,
-                'supervisor_clock_domain':s.domain,'handoff_at_monotonic':s.clock(),'no_replay':True}
-        put(p/'launch-intent.json',launch)
+        with TRANSITIONS:
+            if (p/'launch-intent.json').exists() or (p/'expired.json').exists():return s.status(job_id)
+            same_clock(ticket['enqueue_clock_domain'],s.domain)
+            now=s.clock();require(finite(now) and now>=ticket['queued_at_monotonic'], 'queue clock regression')
+            if now>=ticket['deadline_monotonic'] or (p/'cancel-requested.json').exists() or (
+                    hasattr(self.launcher.platform,'client_alive') and not self.launcher.platform.client_alive(p)):
+                put(p/'expired.json',{'status':'expired_not_started','model_requests':0,'worker_spawned':False})
+                return s.status(job_id)
+            if not self.launcher.available:raise Unavailable('no accepted native launcher/model adapter')
+            lease=self._lease(ticket)
+            launch={'job_id':job_id,'ticket_sha256':digest(canonical(ticket)),'lease_id':lease.name,
+                    'supervisor_clock_domain':s.domain,'handoff_at_monotonic':s.clock(),'no_replay':True}
+            put(p/'launch-intent.json',launch)
         try:
             require(s.clock()<ticket['deadline_monotonic'], 'expired before launch handoff')
             raw=self.launcher.execute(p,detached(ticket),detached(launch))
@@ -541,10 +568,22 @@ class Dispatcher:
                    'known_identity_sources':output['known_identity_sources'],
                    'launcher_receipt_sha256':digest(raw),'lease_id':lease.name,'published_at_monotonic':published,
                    'runtime_accepted':False,'formal_submission_ready':False,'model_benefit_verified':False}
-            put(p/'final.json',final)
-            put(lease/'released.json',{'lease_id':lease.name,'final_sha256':digest(canonical(final)),
+            commit(p/'final.json',final)
+            commit(lease/'released.json',{'lease_id':lease.name,'final_sha256':digest(canonical(final)),
                                      'native_closure_verified':False,'basis':'validated injected platform evidence'})
         except Exception as exc:
+            # A proven native cancellation/failure may finish empty and release
+            # the lease. Missing/unknown resource evidence still blocks reuse.
+            if (p/'launcher-receipt.json').exists() and hasattr(self.launcher.platform,'failure_resources'):
+                try:
+                    from failure_delivery import publish_failure
+                    final=publish_failure(p,ticket,launch,read(p/'launcher-receipt.json'),
+                        self.launcher.platform,put,s.clock,type(exc).__name__)
+                    commit(lease/'released.json',{'lease_id':lease.name,'final_file':'failure-final.json',
+                        'final_sha256':digest(canonical(final)),'basis':'native observed closed failure'})
+                    return s.status(job_id)
+                except Exception as closure_error:
+                    put(p/'failure-closure-unknown.json',{'error_type':type(closure_error).__name__})
             put(p/'dispatch-unknown.json',{'status':'attempted_or_unknown','error_type':type(exc).__name__,
                                          'automatic_resume':False,'lease_retained':True})
         return s.status(job_id)
@@ -561,6 +600,11 @@ class Service:
         if not self.offline_injection:raise Unavailable('native service is not accepted or configured')
         return self.store.submit(request,queued_at=queued_at)
     def job(self,job_id):
+        with TRANSITIONS:
+            p=self.store.job(job_id);ticket=self.store.ticket(job_id)
+            if not (p/'launch-intent.json').exists() and not (p/'expired.json').exists() and (
+                    self.store.clock()>=ticket['deadline_monotonic'] or (p/'cancel-requested.json').exists()):
+                put(p/'expired.json',{'status':'expired_not_started','model_requests':0,'worker_spawned':False})
         state=self.store.status(job_id)
         # Keep the internal evidence state. Projection alone never releases a
         # serial lease or claims process closure.
@@ -584,3 +628,10 @@ class Service:
                 'execution_evidence_state':state['status'],
                 'elapsed_s':max(0.,self.store.clock()-ticket['queued_at_monotonic'])}
         return state
+
+    def cancel(self,job_id):
+        with TRANSITIONS:
+            p=self.store.job(job_id);self.store.ticket(job_id)
+            if not (p/'cancel-requested.json').exists():
+                put(p/'cancel-requested.json',{'at_monotonic':self.store.clock(),'automatic_retry':False})
+        return {'job_id':job_id,'cancel_requested':True,'closure_confirmed':False}

@@ -1,88 +1,46 @@
-# 操作说明
+# 部署与维护
 
-## 1. 先确认部署环境
+普通使用看 [四步跑通一道题](QUICKSTART.md)。这份文档只说明部署条件和维护，不必每题重做。
 
-本方案使用赛事 Linux 镜像及 `model/` 中锁定的模型和后端。模型文件约 22.1 GB，不能提交到 Git；应在比赛断网前准备到运行锁指定的路径。`/opt/python/bin/python3`、`/opt/llamacpp/llama-server`、对应 ROCm 库及 `/tools/Xilinx/2026.1/Vivado` 必须可用。启动器会拒绝缺失或哈希不符的文件，不自动换版本。
+## 启动约定
 
-此目录是一份独立分发内容。切换正在使用的服务前，先等已有任务结束并确认服务关闭。不要在同一块 GPU 上并行启动另一套模型。
+`bash serve/start.sh` 启动模型和本地解题引擎，以独立会话在后台运行；就绪才返回成功。重复执行不创建第二份模型。文件入口为 `bash run.sh 输入目录 空输出目录`，也可使用 `python3 tools/solve.py 输入目录` 自动创建输出目录。文件入口无需公网、隧道或赛事令牌。
 
-## 2. 配置仓库外的数据
+`bash serve/run_api.sh start` 才开启 127.0.0.1:7860 公网投题适配器。它校验赛事令牌，将请求交给同一引擎；不会另启模型。对外三个端点严格采用官方 health/solve/jobs 契约。缺少或错误令牌返回401，未知任务404，nonce与不同请求冲突409，暂不可用503，正常受理202。
 
-将 `serve/deployment.example.json` 复制到仓库外，例如 `/workspace/rtlagent/deployment.local.json`，填入已经核对的主机名、boot ID、执行身份和持久盘目录。主机名可用 `hostname` 读取，boot ID 可用 `cat /proc/sys/kernel/random/boot_id` 读取。重建实例后必须重新核对，不要直接改成新值来绕过身份异常。
+本地文件客户端会登记自己的 PID、启动时间和 boot 身份。Ctrl+C/SIGTERM 请求取消，客户端被强杀时引擎也会检测其退出；不会把相同 PID 的另一个进程误认成客户端。取消或超时只有在工作进程、子进程和模型请求确认结束后，才释放串行位置。关闭未知时保留证据并停止准入，不能删除状态目录强行继续。
 
-```bash
-export RTL_DEPLOYMENT_FILE=/workspace/rtlagent/deployment.local.json
-export RTL_STATE_DIR=/workspace/rtlagent/state
-export RTL_SESSION_DIR=/var/tmp/rtlagent
-```
+## 环境与模型
 
-`RTL_STATE_DIR` 保存任务与幂等记录；`RTL_SESSION_DIR` 保存进程与 EDA 临时文件。它们都必须在源码目录之外。启动脚本不会删除旧任务记录。已有启动 intent、未关闭任务或未释放 lease 时，会停止并要求先检查。
+使用官方 Dockerfile 中锁定的比赛镜像。它位于平台私有镜像仓库，官方参考文件已说明参赛实例不提供 Docker；容器重建由赛事方执行。本仓库没有把未执行的 Docker build 写成实测成功。
 
-令牌通过环境变量 `FPGACHINA_TOKEN` 提供，或使用仓库外的私密环境文件。默认文件为 `/workspace/.fpgachina-49329/token.env`；可用 `FPGACHINA_TOKEN_FILE` 指定其他绝对路径。文件内容为 `export FPGACHINA_TOKEN=实际令牌`，权限应仅允许文件所有者读写。令牌不写入仓库、命令示例、截图或日志。
+镜像需提供 `/opt/python/bin/python3`、Uvicorn、`/opt/llamacpp/llama-server` 及 ROCm 库。Vivado 路径读取 `XILINX_VIVADO`。许可证读取实例的 `XILINXD_LICENSE_FILE`；工程工作区使用 `EDA_TMP`，推荐 `/var/tmp/eda`，每次独占创建。完成后保留必要的 DUT、诊断和关闭记录，清理已确认关闭的工作目录。
 
-## 3. 启动并检查
+权重必须在断网前准备好或绑定挂载到：
 
-```bash
-/opt/python/bin/python3 -B tools/check_release.py
-chmod +x run.sh run_baseline.sh serve/start.sh
-./serve/start.sh
-curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:7860/v1/health
-curl --noproxy '*' -s -H "Authorization: Bearer ${FPGACHINA_TOKEN}" http://127.0.0.1:7860/v1/health
-```
+`/var/tmp/model-selection-20261019/weights/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf`
 
-第一条 curl 应为 401，第二条应返回 `ready: true`、`track: rtl` 和匹配的模型。启动器以独立会话运行服务，正常关闭终端不会带走服务。重复启动只允许检查同一健康进程；旧记录存在但进程已退出时不会擅自创建第二套服务。
+准确公开下载地址、revision、文件大小、SHA、量化与生成配置见 [MODEL.md](../model/MODEL.md)。启动会核对这些值以及后端和模板；不会联网下载、换模型或改生成参数。
 
-用私密文件而没有导出环境变量时，启动器仍能读取令牌，但手动 curl 之前需在当前终端加载该文件。不得打印令牌检查是否正确。
+Docker 退路遵循官方两步：先 `bash serve/start.sh`，再 `bash run.sh <task_dir> <out_dir>`。无需另起公网投题服务，无需提供赛事令牌或手工填写部署身份。`run_baseline.sh` 与 `baseline.py` 保持赛事方原字节，直接调用同一模型；官方串行运行时，按原约定调用即可，不要手工与 Agent 并发。
 
-## 4. 开赛方隧道
+## 状态与令牌
 
-先保证本地健康检查通过，再按赛方说明安装和 expose：
+状态默认 `/workspace/rtlagent/state`，临时会话默认 `/var/tmp/rtlagent`，可分别用 `RTL_STATE_DIR`、`RTL_SESSION_DIR` 指定其他仓库外绝对路径。任务、nonce、已启动记录与终态保留，重新启动不重放题目。正常停止且确认子进程全关闭后，start.sh 可创建新会话。
+
+本地引擎使用自动生成、仅所有者可读写的内部凭据。赛事令牌仅供公网投题适配器使用：从 `FPGACHINA_TOKEN` 或私有环境文件读取。默认私有文件 `/workspace/.fpgachina-49329/token.env`，也可设置 `FPGACHINA_TOKEN_FILE`。不要提交令牌、密钥或真实状态目录。
+
+维护命令：
 
 ```bash
-/var/run/secrets/frp-self-service/install
-env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
-  "$HOME/.local/bin/rc-tunnel" expose --port 7860
-"$HOME/.local/bin/rc-tunnel" status
+bash serve/start.sh status
+bash serve/run_api.sh status
 ```
 
-从自己的电脑携带令牌访问公网地址的 `/v1/health`，确认 HTTP 200、`ready: true`、`track: rtl`。只暴露 7860，不暴露模型端口 8000。服务中断或实例重启可能导致隧道失效；恢复服务后查询状态，必要时按赛方流程重新 expose 并记录新 URL。网址报送按赛方最新通知办理。
+确需停止时先等待题目完成，然后 `bash serve/run_api.sh stop`、`bash serve/start.sh stop`。重启后如赛方隧道已失效，应重新 expose 并更新报送网址。比赛正式投题期间保持服务持续运行。
 
-## 5. 把题目交给系统
+## 结果如何理解
 
-将完整题面写入题目目录的 `prompt.txt`。题面应包含模块名、端口、位宽、时序、复位和要求的行为，不需要把测试台或参考答案交给模型。另有公开接口文件时才放 `interface.txt`。
+`solution.v` 是生成代码，内部 xvlog 只证明前端编译。`tools/grade.py` 调用官方原始判定器，L1为编译和详细描述通过、L2为测试台仿真通过、L3再加综合通过。工具授权异常单列，不算功能错误。只有 prompt.txt 的自写题不能凭空获得功能分数；正式隐藏测试由赛事方执行。
 
-当前源码策略仅接受单个、大小写精确为 `TopModule` 的模块。其他模块名或多模块交付会被归为策略拒绝，不是编译器确认的语法错误，也不会据此开放编译修复。此限制来自现有执行器，不能把操作说明当成支持任意模块接口的承诺。
-
-```bash
-./run.sh /path/to/problem /path/to/unused-output
-```
-
-程序会提交一次请求并等待同一 job 的结果。`solution.v` 是最终交付的 RTL，`trace.jsonl` 是执行记录，`accepted.json` 中保存 job_id。查看 `result.json` 可区分任务状态；文件为空或请求状态未知，都不能作为答题成功。
-
-官方基线使用同一题目、另一空输出目录，并在模型空闲时串行运行：
-
-```bash
-./run_baseline.sh /path/to/problem /path/to/unused-baseline-output
-```
-
-对 API 直接投题时，正文包含 `task_id`、`nonce`、`mode`、`prompt`、`interface` 和 `deadline_s`；`mode` 为 `agent` 或 `baseline`。POST 返回 202 后用同一 job_id 查询，不要因等待较久而再次投题。正式赛方投题由平台完成，参赛者保持服务运行即可。
-
-## 6. 出错时怎么处理
-
-| 现象 | 处理 |
-| --- | --- |
-| 401 | 检查令牌是否注入，勿关闭鉴权 |
-| 不 ready / 503 | 查状态目录的 service.log 和启动记录；不要重复起模型 |
-| startup intent 已存在 | 先确认原服务及其任务是否仍运行，保留记录 |
-| POST 超时或返回格式异常 | 保存 nonce 与 intent；先查原 job，不能直接换 nonce 补发 |
-| done 但 solution 为空 | 这是交付失败，保留 trace；不要改成成功 |
-| 编译过但仿真不对 | 以独立功能评判为准，前端编译不能证明功能 |
-| 主机/boot/权重校验失败 | 停止启动并核对实际环境，不删除校验门 |
-
-本分发版没有自动修复重启状态的命令。人工恢复必须先核清任务、模型请求、工具和监督进程的退出事实；不能通过删除 state 目录来让已执行任务重新运行。
-
-## 7. 交付检查
-
-仓库默认分支应包含本目录的完整文件，shell 文件使用 LF 换行。不要提交仓库外的令牌、部署身份、运行目录、权重或开发记录。代码冻结前应完成一次本分发版在赛事镜像上的启动、文件入口、鉴权与任务闭合验收；仅文件校验成功不能替代该验收。
-
-报告里的 U 编号由本人按实际经历填写，D 编号用于补充真实测试和验收结果。可以直接编辑 `REPORT.md`，也可以用随交付的离线填写表导出同名报告替换它。运行校验只对这一份 UTF-8 文档允许补写；模型、代码、知识和启动脚本的校验仍然有效。报告终稿需移除占位符并检查匿名性与页数；内部填写表不上传为报告。
+REPORT.md 中 U 编号保留给参赛者亲自填写，包含官方要求的协作记录；D 编号用于尚待实测的数据。报告可以补写，运行源码与知识文件仍须符合完整性清单。

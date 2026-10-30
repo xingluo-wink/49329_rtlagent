@@ -41,8 +41,9 @@ def deployment():
         raise ValueError('invalid deployment hostname')
     if str(uuid.UUID(value['boot_id'])) != value['boot_id']:
         raise ValueError('invalid deployment boot identity')
-    if value['execution_ids'] != [0,0,0,0] or value['workspace_owner'] != [65534,65534]:
-        raise ValueError('deployment execution/storage identities differ')
+    if any(type(value[k]) is not list or len(value[k])!=n or any(type(x) is not int or x<0 for x in value[k])
+           for k,n in (('execution_ids',4),('workspace_owner',2))):
+        raise ValueError('invalid deployment execution/storage identities')
     root = PurePosixPath(value['persistent_root'])
     if not root.is_absolute() or '..' in root.parts or root.parts[:2] != ('/','workspace'):
         raise ValueError('persistent storage must be under /workspace')

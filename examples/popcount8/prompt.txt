@@ -1,0 +1,12 @@
+
+I would like you to implement a module named TopModule with the following
+interface. All input and output ports are one bit unless otherwise
+specified.
+
+ - input  in  (8 bits)
+ - output out (4 bits)
+
+The module should count the number of bits in the input vector that are
+1, also known as a population count. The output is a value from 0 to 8.
+
+This is purely combinational logic. There is no clock and no reset.

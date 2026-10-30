@@ -15,6 +15,7 @@ from native_model import NativeModel, identity, runtime_fingerprint
 from generation_policy import GenerationPolicy
 from prompt_builder import canonical, digest
 from compiler_adapter import pinned_sources
+from runtime_environment import install,vivado
 
 ROOT = Path(__file__).resolve().parent
 from runtime_paths import deployment, state_root
@@ -35,6 +36,7 @@ def private_common(root):
     exec(compile(sources['common.py'], str(ROOT/'common.py'), 'exec'), mod.__dict__)
     mod.ROOT = Path(root); mod.REG = Path(root)/'processes'
     mod.REG.mkdir(exist_ok=False)
+    install(mod)
     return mod
 
 
@@ -81,6 +83,35 @@ class NativePlatform:
         require(all(saved[k] == current[k] for k in ('pid','start_ticks','boot_id')), 'worker identity changed')
         return current
 
+    def client_alive(self,job):
+        p=job/'client-owner.json'
+        if not p.exists():return True
+        saved=json.loads(p.read_bytes())
+        try:
+            row=identity(saved['pid'])
+            return row['state']!='Z' and all(row[k]==saved[k] for k in ('pid','start_ticks','boot_id'))
+        except FileNotFoundError:return False
+
+    def failure_resources(self,job,worker):
+        self.owner.guard()
+        saved=self.jobs[worker['pid']][1]
+        rows=[saved]+registry_rows(job)
+        service_keys={self.common.identity_key(q) for q in (self.owner.model_identity,self.owner.watchdog_identity) if q}
+        rows += [q for q in self.common.capture_owned() if q['pid']!=os.getpid()
+                 and self.common.identity_key(q) not in service_keys
+                 and not service_keys.intersection(q.get('owner_keys',[]))]
+        observed=compact_rows(self.common,rows)
+        require(all(q['state'] in ('exited','Z') for q in observed),'failure still has live owned processes')
+        end=time.monotonic()+4.;idle=False
+        while time.monotonic()<end:
+            slots=self.common.http('/slots')
+            idle=type(slots) is list and len(slots)==1 and slots[0].get('is_processing') is False
+            if idle:break
+            time.sleep(.1)
+        require(idle,'cancelled backend request has not become idle')
+        return {'job_id':job.name,'worker':worker,'owned_snapshot':observed,
+                'model_backend_idle':True,'observed_at_monotonic':time.monotonic()}
+
     def close_owned(self, process, worker, *, terminate):
         job, saved = self.jobs[process.pid]
         key = self.common.identity_key(saved)
@@ -122,17 +153,30 @@ class TrialService(Service):
         self.native_trial = True; self.owner = owner
     def health(self):
         value=self.owner.health()
-        if (STATE/'admission-paused.json').exists():value={**value,'ready':False}
+        if (STATE/'admission-paused.json').exists():value={**value,'ready':False,'reason':'服务正在独立评分，暂停接题'}
         return value
-    def solve(self, request, *, queued_at=None):
+    def solve(self, request, *, queued_at=None, outer_deadline=None):
         import fcntl
         from formal_jobs import Unavailable
+        if (STATE/'admission-paused.json').exists():raise Unavailable('服务正在独立评分，暂停接题；本次没有启动模型')
         with (STATE/'admission.lock').open('a') as lock:
-            fcntl.flock(lock,fcntl.LOCK_EX)
+            try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:raise Unavailable('准入暂忙；本次没有启动模型')
             if (STATE/'admission-paused.json').exists():raise Unavailable('private grading in progress')
             self.owner.guard()
             require(self.health()['ready'], 'real service unavailable')
-            return self.store.submit(request,queued_at=queued_at,outer_deadline=None)
+            return self.store.submit(request,queued_at=queued_at,outer_deadline=outer_deadline)
+
+    def solve_local(self,request,client,*,queued_at=None,outer_deadline=None):
+        from formal_jobs import TRANSITIONS
+        actual=identity(client['pid'])
+        require(actual['state']!='Z' and all(actual[k]==client[k] for k in ('pid','start_ticks','boot_id')),'local client identity changed')
+        with TRANSITIONS:
+            result=self.solve(request,queued_at=queued_at,outer_deadline=outer_deadline)
+            path=self.store.job(result['job_id'])/'client-owner.json'
+            if not path.exists():put(path,client)
+            else:require(json.loads(path.read_bytes())==client,'local client cannot be rebound')
+            return result
 
 
 class NativeOwner:
@@ -165,14 +209,14 @@ class NativeOwner:
                 and [os.getuid(),os.geteuid(),os.getgid(),os.getegid()] == expected['execution_ids'], 'deployment identity changed')
         storage = Path(expected['persistent_root']).stat()
         require([storage.st_uid, storage.st_gid] == expected['workspace_owner'], 'persistent storage identity changed')
-        for port in (7860,8000,8001):
+        for port in (8000,8001):
             with socket.socket() as s:
                 require(s.connect_ex(('127.0.0.1',port)) != 0, 'model port occupied')
         GenerationPolicy.load(); pinned_sources()
-        compiler=Path('/tools/Xilinx/2026.1/Vivado/bin/xvlog')
+        compiler=vivado()/'bin/xvlog'
         require(compiler.is_file() and os.access(compiler,os.X_OK),'compiler entry unavailable')
         for p in (STATE/'store'/'jobs').glob('*'):
-            require((p/'final.json').is_file() or (p/'expired.json').is_file(),
+            require((p/'final.json').is_file() or (p/'failure-final.json').is_file() or (p/'expired.json').is_file(),
                     'unfinished persistent job: no automatic restart or replay')
         for p in (STATE/'store'/'leases').glob('*'):
             require((p/'released.json').is_file(),'persistent lease closure unknown')
@@ -258,9 +302,7 @@ class NativeOwner:
         return {'ready':bool(live),'track':'rtl','model':'Qwen/Qwen3.6-35B-A3B',
             'vram_gb':round(observed['gpu']['used']/1e9,3) if observed else None,
             'vram_bytes':observed['gpu']['used'] if observed else None,
-            'validation_scope':'final_acceptance_candidate','solve_execution_tested':False,
-            'formal_submission_ready':False,'model_benefit_verified':False,
-            'agent_and_baseline_same_generation':True}
+            'reason':None if live else '模型、调度线程或资源状态尚未就绪'}
 
     def close(self):
         self.monitor_stop.set()

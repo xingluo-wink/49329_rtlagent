@@ -9,6 +9,9 @@ import sys
 import threading
 import time
 import types
+import tempfile
+import shutil
+from runtime_environment import vivado,install
 from adapter_contracts import BoundaryError, CompileReply, require, finite
 from prompt_builder import canonical, digest
 from rtl_delivery import inspect_body, strict_json
@@ -20,7 +23,7 @@ from source_policy import source_allowed
 PINS = {'common.py':'db4811f8e1b0f04c96cf74874ac40bdc30a6f2d0e96ddfbf83c7191b5e4882cb',
         'eda_runner.py':'7a5d5a94b4df7b0cad310793e380f6e511306d1c8758737cccce3c7b2ee6284d',
         'host_completion.py':'9c1f64a0d2e582a1f55d401ebff960ec5f10fa284e5d5357a1c9e4881092a58a'}
-ARGV = ['/tools/Xilinx/2026.1/Vivado/bin/xvlog','--sv','dut.sv']
+ARGV = [str(vivado()/'bin/xvlog'),'--sv','dut.sv']
 
 
 def pinned_sources():
@@ -163,6 +166,7 @@ def native_backend(registry_root, folder, context, clock=time, *, allow_native=F
     (registry_root/'processes').mkdir()
     # These must be set BEFORE executing 'from common import *' in R1.
     common.ROOT, common.REG, common.time = registry_root, registry_root/'processes', clock
+    install(common)
     current = common.ident(os.getpid())
     domain = context['clock_domain']
     require(current is not None and all(current[k] == domain[k] for k in ('pid','start_ticks','boot_id')),
@@ -177,9 +181,11 @@ def native_backend(registry_root, folder, context, clock=time, *, allow_native=F
 
 
 class CompilerBridge:
-    def __init__(self, backend_factory=None, clock=time):
+    def __init__(self, backend_factory=None, clock=time, *, local_work=False):
         self.clock = clock
         self.factory = backend_factory or native_backend
+        self.local_work=local_work
+        self.work=None
 
     def compile(self, *, source, body, artifact_dir, context, permit):
         started = self.clock.monotonic()
@@ -205,6 +211,13 @@ class CompilerBridge:
         publish_timing()
         if self.clock.monotonic() >= phase_end:
             raise TimeoutError('timing publication exceeded original tool phase')
+        if self.local_work and self.work is not None:
+            # Only a successfully bound, closed compile reaches here. Preserve
+            # unknown/failed infrastructure work for inspection instead.
+            base=Path(os.environ.get('EDA_TMP','/var/tmp/eda')).resolve()
+            work=self.work.resolve()
+            require(work.parent==base and work.name.startswith('rtl-') and not self.work.is_symlink(),'scratch cleanup boundary')
+            shutil.rmtree(work)
         return reply
 
     def _compile(self, *, source, body, artifact_dir, context, permit, started, timings):
@@ -237,8 +250,15 @@ class CompilerBridge:
         # Observations are retained for review; they never admit repair, select a
         # candidate or substitute for the original compiler's executed verdict.
         write('source-advisories.json', canonical(inspect_source(source)))
-        work = root/'work';work.mkdir()
-        dut_ref = write('work/dut.sv',source)
+        if self.local_work:
+            base=Path(os.environ.get('EDA_TMP','/var/tmp/eda'));base.mkdir(parents=True,exist_ok=True)
+            work=Path(tempfile.mkdtemp(prefix='rtl-',dir=base));self.work=work
+            with (work/'dut.sv').open('xb') as f:f.write(source)
+            dut_ref=write('staged-dut.sv',(work/'dut.sv').read_bytes())
+            write('scratch-location.json',canonical({'path':str(work.resolve()),'persistent_artifacts':str(root.resolve())}))
+        else:
+            work = root/'work';work.mkdir()
+            dut_ref = write('work/dut.sv',source)
         with timings.span('backend_prepare'):
             backend = self.factory(root/'registry', work, context, self.clock)
         backend.timings = timings

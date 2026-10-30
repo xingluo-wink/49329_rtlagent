@@ -83,7 +83,7 @@ class App:
             if method=='GET' and path=='/v1/health':code,data=200,self.service.health()
             elif method=='GET' and path.startswith('/v1/jobs/'):
                 code,data=200,self.service.job(path[len('/v1/jobs/'):])
-            elif method=='POST' and path=='/v1/solve':
+            elif method=='POST' and path in ('/v1/solve','/v1/solve-local','/v1/solve-public'):
                 raw=bytearray()
                 while True:
                     remaining=BODY_ADMISSION_SECONDS-(self.service.store.clock()-start)
@@ -97,10 +97,20 @@ class App:
                 # already-expired fresh task merely because there is no next read.
                 if self.service.store.clock() >= start+BODY_ADMISSION_SECONDS:
                     raise Unavailable('request body consumed admission deadline')
-                code,data=202,self.service.solve(strict_json(bytes(raw)),queued_at=start)
+                value=strict_json(bytes(raw))
+                if path=='/v1/solve-local':
+                    require(set(value)=={'request','client','deadline_monotonic'},'local envelope fields')
+                    code,data=202,self.service.solve_local(value['request'],value['client'],queued_at=start,outer_deadline=value['deadline_monotonic'])
+                elif path=='/v1/solve-public':
+                    require(set(value)=={'request','queued_at_monotonic'} and type(value['queued_at_monotonic']) in (int,float)
+                        and start-10<=value['queued_at_monotonic']<=start,'public clock envelope')
+                    code,data=202,self.service.solve(value['request'],queued_at=value['queued_at_monotonic'])
+                else:code,data=202,self.service.solve(value,queued_at=start)
+            elif method=='POST' and path.startswith('/v1/jobs/') and path.endswith('/cancel'):
+                code,data=202,self.service.cancel(path[len('/v1/jobs/'):-len('/cancel')])
             else:code,data=404,{'error':'unknown endpoint'}
         except Conflict:code,data=409,{'error':'nonce conflicts with existing full request'}
-        except (Busy,Unavailable,TimeoutError):code,data=503,{'error':'unavailable or prior operation unresolved'}
+        except (Busy,Unavailable,TimeoutError) as exc:code,data=503,{'error':str(exc)[:250]}
         except FileNotFoundError:code,data=404,{'error':'unknown job'}
         except (BoundaryError,ValueError,UnicodeError,KeyError):code,data=400,{'error':'invalid request or evidence'}
         await self.reply(send,code,data)

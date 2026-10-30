@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""
+veval-judge -- 单题分级判定器（Vivado / xsim 版）
+
+对任意 (dut, ref, test) 三元组给出 L1 / L2 / L3 分级结果，供三处复用：
+对外发布的自测脚本、隐藏题集测试脚本、赛事方内部回归。
+
+判定口径见《RTL/HLS 本地智能体设计赛道 · 评测执行手册》步骤 4：
+
+  L1  可编译   xvlog 分析 + xelab 详细描述均通过
+  L2  仿真通过 xsim 运行参考测试台，日志中 Mismatches 为 0 且采样数不为 0
+  L3  可综合   synth_design 在目标器件上产出网表且无 ERROR
+
+本文件为赛事方原创，判定所依赖的数据集与测试台格式来自
+NVlabs/verilog-eval（MIT License, Copyright (c) 2023-2024 NVIDIA Research Projects）。
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+# 固定仿真种子。不显式给定时 $urandom 系列的行为不受保证，
+# 而 pass@1 / pass@5 与申诉复核都要求同一 dut 重复运行结果一致。
+SV_SEED = "0"
+
+# L3 默认器件与时钟。
+#
+# 原为 ZU9EG（赛道文档 2.4 早期取值），已改成 ZU3EG，与 judge.py、hls-judge、
+# 赛道仓库《接口契约》以及《基础镜像规格》第五节一致。ZU9EG 作为默认值有两个
+# 独立的坑，且本文件是要发给队伍自测的：
+#   · BASIC 档授权不覆盖 ZU9EG，L3 判不成（见 README「2026.1 的授权」）
+#   · trim-xilinx.sh 只保留 xczu3eg 的器件数据，正式镜像里没有 ZU9EG，
+#     与授权无关也一样失败
+DEFAULT_PART = "xczu3eg-sbva484-1-e"
+DEFAULT_CLOCK_NS = 5.0
+
+TOP_TB = "tb"
+TOP_DUT = "TopModule"
+
+MISMATCH_RE = re.compile(r"^Mismatches:\s+(\d+)\s+in\s+(\d+)\s+samples", re.M)
+
+# 授权失败必须与「选手做错」区分开。2026.1 起 Vivado 改用分层授权，xsim 与
+# synth_design 都需要签出 seat，而 **xsim 在拿不到授权时仍然退出 0 且不打印
+# Mismatches 行** —— 不识别的话，一次授权抖动会把整批样本静默判成 L1
+# （「能编译、仿真没过」），成绩表上看不出任何异常。
+#
+# 下列字样为 2026.1 实测采集，非推断：
+#   xsim    Could not obtain the necessary license for Simulator.
+#           ERROR: Unable to get Licensing information for Vivado Simulator.
+#   vivado  ERROR: Vivado Design Suite cannot be launched because a valid
+#           license was not found.
+LICENSE_RE = re.compile(
+    r"could not obtain the necessary license"
+    r"|unable to get licensing information"
+    r"|license checkout failure"
+    r"|valid license was not found",
+    re.I)
+
+# 授权档位不覆盖所选器件，是另一条会静默降级的路径。BASIC 档遇到 ZU9EG 时
+# 先出一条 WARNING [Device 21-9575]，随后 synth 以
+# `ERROR: [Coretcl 2-106] Specified part could not be found.` 失败 ——
+# 字面意思是「器件找不到」，看着像器件名拼错，实际是档位不够。
+# 不识别的话 L3 判不成却报成 L2，整个 L3 维度会无声消失
+# （veval-judge 的默认器件恰好就是 ZU9EG）。
+#
+# 认消息码而不认散文：器件名拼错时只有 Coretcl 2-106、没有 Device 21-9575，
+# 两种情形因此能区分开。
+TIER_RE = re.compile(r"\[Device 21-9575\]")
+
+# 判定级别形如 L0/L1/L2/L3；其余（LICENSE_ERROR、FIXTURE_ERROR）是基础设施或
+# 题目问题，不是分级结果。用 fullmatch 而非 startswith("L")，否则
+# LICENSE_ERROR 会被 finish() 当成分级名覆盖掉。
+LEVEL_VERDICT_RE = re.compile(r"L\d+$")
+
+
+def run(cmd, cwd, log_fh, timeout, tag):
+    """在 cwd 中执行 cmd，输出追加进 log_fh。返回 (rc, timed_out)。
+
+    用独立进程组启动，超时时整组杀掉 —— xelab/xsim 会派生子进程
+    （xsimk、C 编译器），只杀直接子进程会留下孤儿。
+    """
+    log_fh.write(f"\n===== [{tag}] {' '.join(cmd)} =====\n")
+    log_fh.flush()
+    t0 = time.time()
+    try:
+        p = subprocess.Popen(
+            cmd, cwd=cwd, stdout=log_fh, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    except FileNotFoundError:
+        log_fh.write(f"[{tag}] 可执行文件不存在：{cmd[0]}\n")
+        return 127, False, 0.0
+
+    try:
+        rc = p.wait(timeout=timeout)
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.wait()
+        rc = 124
+        timed_out = True
+        # 写入 TIMEOUT 标记。iverilog 的 -Winfloop 在编译期就能抓无延时死循环，
+        # xsim 没有对应物：仿真时间不推进时测试台内的 #1000000 超时块永远
+        # 触发不了，外层墙钟超时是唯一防线。
+        log_fh.write(f"\nTIMEOUT [{tag}] after {timeout}s\n")
+
+    log_fh.flush()
+    return rc, timed_out, time.time() - t0
+
+
+def stage_log(text, tag):
+    """截取 judge.log 里某一阶段的片段。
+
+    与失败码分类同一个理由：整体扫描会把别的阶段的字样算进来。
+    """
+    m = re.search(rf"^===== \[{re.escape(tag)}\].*?$(.*?)(?=^===== \[|\Z)",
+                  text, re.M | re.S)
+    return m.group(1) if m else ""
+
+
+def judge(args):
+    work = os.path.abspath(args.workdir)
+    if os.path.exists(work) and args.clean:
+        shutil.rmtree(work)
+    os.makedirs(work, exist_ok=True)
+
+    dut = os.path.abspath(args.dut)
+    ref = os.path.abspath(args.ref)
+    test = os.path.abspath(args.test)
+    for label, path in (("dut", dut), ("ref", ref), ("test", test)):
+        if not os.path.isfile(path):
+            sys.exit(f"veval-judge: --{label} 不存在: {path}")
+
+    log_path = os.path.join(work, "judge.log")
+    result = {
+        "dut": dut, "ref": ref, "test": test,
+        "level": 0, "verdict": "L0",
+        "stages": {},
+        "mismatches": None, "samples": None,
+        "sim_timeout": False,
+        "vivado_version": vivado_version(),
+        "sv_seed": SV_SEED,
+        "log": log_path,
+    }
+
+    with open(log_path, "w") as log:
+        # ---------------- L1a: DUT 分析（严格） ----------------
+        # DUT 是被判定的对象，不加 --relax。
+        rc, _, dt = run(["xvlog", "-sv", "--nolog", dut],
+                        work, log, args.timeout_compile, "xvlog:dut")
+        result["stages"]["xvlog_dut"] = {"rc": rc, "sec": round(dt, 2)}
+        if rc != 0:
+            return finish(result, log_path)
+
+        # ---------------- L1b: 测试台与参考实现分析（放松） ----------------
+        # 156 道 VerilogEval 测试台全部在 $dumpvars 里引用了下方才声明的
+        # tb_mismatch（VRFC 10-3380）。iverilog 接受，xvlog 默认报错。
+        # 这是赛事方提供的固定装置代码，不参与判定，故对其单独放松，
+        # 从而不牵连上面对 DUT 的严格检查。
+        rc, _, dt = run(["xvlog", "-sv", "--relax", "--nolog", test, ref],
+                        work, log, args.timeout_compile, "xvlog:fixture")
+        result["stages"]["xvlog_fixture"] = {"rc": rc, "sec": round(dt, 2)}
+        if rc != 0:
+            # 装置侧编译失败属赛事方的题目缺陷，不是选手的错，单独标记
+            result["verdict"] = "FIXTURE_ERROR"
+            return finish(result, log_path)
+
+        # ---------------- L1c: 详细描述 ----------------
+        # -timescale 必须显式给定。测试台首行是 `timescale 1 ps/1 ps，而
+        # 数据集的 DUT 从不声明 timescale；xsim 2024.2 与 2025.2 遇到这种
+        # 混合会报 ERROR [XSIM 43-4099] 拒绝详细描述，2026.1 才放宽。不给
+        # 这个开关，整个题集在 2026.1 之前的版本上会全部误判为 L1 失败。
+        # 取值与测试台一致，使各版本的仿真单位完全相同。
+        rc, to, dt = run(["xelab", TOP_TB, "-s", "tb_snap", "--nolog",
+                          "-timescale", "1ps/1ps"],
+                         work, log, args.timeout_elab, "xelab")
+        result["stages"]["xelab"] = {"rc": rc, "sec": round(dt, 2), "timeout": to}
+        if rc != 0:
+            return finish(result, log_path)
+
+        result["level"] = 1
+
+        # ---------------- L2: 仿真 ----------------
+        rc, to, dt = run(["xsim", "tb_snap", "-R", "--nolog", "-sv_seed", SV_SEED],
+                         work, log, args.timeout_sim, "xsim")
+        result["stages"]["xsim"] = {"rc": rc, "sec": round(dt, 2), "timeout": to}
+        result["sim_timeout"] = to
+
+    text = open(log_path, errors="replace").read()
+
+    # 授权失败优先于一切分级判断。xsim 拿不到 seat 时退出码仍是 0、日志里也
+    # 没有 Mismatches 行，落到下面的 l2_pass 会被判成 L1，看不出是环境问题。
+    if LICENSE_RE.search(stage_log(text, "xsim")):
+        result["verdict"] = "LICENSE_ERROR"
+        result["level"] = None
+        result["note"] = "xsim 未能签出 Simulator 授权，本次判定无效"
+        return result
+
+    # 判据是日志中的 Mismatches 行，不是进程退出码 —— 测试台在存在差异时
+    # 仍会正常退出（评测执行手册 步骤 4）。
+    m = MISMATCH_RE.search(text)
+    if m:
+        result["mismatches"] = int(m.group(1))
+        result["samples"] = int(m.group(2))
+
+    # 测试台自身打印的 TIMEOUT（#1000000 超时块）也算 L2 失败
+    tb_timeout = bool(re.search(r"^TIMEOUT", text, re.M))
+    result["sim_timeout"] = result["sim_timeout"] or tb_timeout
+
+    l2_pass = (
+        not result["sim_timeout"]
+        and result["mismatches"] == 0
+        # 采样数为 0 说明激励根本没跑，必须按失败计，否则会有假通过
+        and (result["samples"] or 0) > 0
+    )
+    if not l2_pass:
+        return finish(result, log_path)
+
+    result["level"] = 2
+
+    # ---------------- L3: 综合 ----------------
+    if args.level >= 3:
+        l3 = synth(dut, work, args)
+        result["stages"]["synth"] = l3
+        if l3["status"] == "OK":
+            result["level"] = 3
+        elif l3["status"] in ("LICENSE_ERROR", "PART_NOT_LICENSED"):
+            # L2 已经成立，但 L3 这一级没判成 —— 报成 L2 会低估。
+            result["verdict"] = l3["status"]
+            result["level"] = None
+            result["note"] = (
+                "synth_design 未能签出授权，本次判定无效"
+                if l3["status"] == "LICENSE_ERROR" else
+                f"授权档位不覆盖器件 {args.part}，L3 无法判定")
+            return result
+        elif l3["status"] == "TIMEOUT":
+            # 综合超时按 L2 计分并标注，不按 L3 失败处理 —— 超时更多反映
+            # 题目规模而非方案质量（评测执行手册 步骤 4）
+            result["synth_timeout"] = True
+
+    return finish(result, log_path)
+
+
+def synth(dut, work, args):
+    """在目标器件上做 OOC 综合。资源统计沿用 tools/veval_survey.tcl 的写法。"""
+    sdir = os.path.join(work, "synth")
+    os.makedirs(sdir, exist_ok=True)
+    tcl = os.path.join(os.path.dirname(os.path.abspath(__file__)), "l3_synth.tcl")
+    out_json = os.path.join(sdir, "synth.json")
+    log_path = os.path.join(sdir, "synth.log")
+
+    with open(log_path, "w") as log:
+        rc, to, dt = run(
+            ["vivado", "-mode", "batch", "-nojournal", "-notrace",
+             "-source", tcl, "-tclargs", args.part, dut, TOP_DUT,
+             str(args.clock_ns), out_json],
+            sdir, log, args.timeout_synth, "synth")
+
+    if to:
+        return {"status": "TIMEOUT", "sec": round(dt, 2), "log": log_path}
+    # synth.log 只含这一个阶段，可以整体扫描。
+    slog = open(log_path, errors="replace").read()
+    if LICENSE_RE.search(slog):
+        return {"status": "LICENSE_ERROR", "rc": rc, "sec": round(dt, 2),
+                "log": log_path}
+    if TIER_RE.search(slog):
+        return {"status": "PART_NOT_LICENSED", "rc": rc, "sec": round(dt, 2),
+                "log": log_path}
+    if os.path.isfile(out_json):
+        try:
+            d = json.load(open(out_json))
+            d["sec"] = round(dt, 2)
+            d["log"] = log_path
+            return d
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"status": "SYNTH_FAIL", "rc": rc, "sec": round(dt, 2), "log": log_path}
+
+
+def finish(result, log_path=None):
+    # 特殊判定（FIXTURE_ERROR、LICENSE_ERROR 等）保留原值，
+    # 其余按已达到的级别命名
+    if not LEVEL_VERDICT_RE.fullmatch(result["verdict"]):
+        return result
+    result["verdict"] = f"L{result['level']}"
+    return result
+
+
+_ver_cache = None
+
+
+def vivado_version():
+    """记录 Vivado 版本 —— 评测执行手册 步骤 4 要求版本号随成绩归档。
+
+    在临时目录里问：xvlog 即使只是打印版本号也会往 cwd 落一个 .pb 文件，
+    在调用方目录里留垃圾。
+    """
+    global _ver_cache
+    if _ver_cache is None:
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                out = subprocess.run(["xvlog", "--version"], cwd=td,
+                                     capture_output=True, text=True,
+                                     timeout=60).stdout
+            m = re.search(r"v(\d{4}\.\d+)", out)
+            _ver_cache = m.group(1) if m else out.strip().splitlines()[0]
+        except Exception:
+            _ver_cache = "unknown"
+    return _ver_cache
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description="VerilogEval 单题分级判定器（Vivado / xsim 版）")
+    p.add_argument("--dut", required=True, help="待测模块（须定义 TopModule）")
+    p.add_argument("--ref", required=True, help="参考实现（定义 RefModule）")
+    p.add_argument("--test", required=True, help="参考测试台（顶层 tb）")
+    p.add_argument("--workdir", required=True,
+                   help="独立工作目录。xsim.dir / *.pb / wave.vcd 都落在这里，"
+                        "并发运行时必须逐样本隔离")
+    p.add_argument("--level", type=int, default=2, choices=(1, 2, 3),
+                   help="判定到哪一级，默认 2（L3 需起 Vivado，慢得多）")
+    p.add_argument("--part", default=DEFAULT_PART)
+    p.add_argument("--clock-ns", type=float, default=DEFAULT_CLOCK_NS)
+    p.add_argument("--timeout-compile", type=int, default=120)
+    p.add_argument("--timeout-elab", type=int, default=300)
+    p.add_argument("--timeout-sim", type=int, default=300)
+    p.add_argument("--timeout-synth", type=int, default=900)
+    p.add_argument("--json", help="判定结果写入该 JSON 文件")
+    p.add_argument("--clean", action="store_true", help="先清空 workdir")
+    p.add_argument("-q", "--quiet", action="store_true")
+    args = p.parse_args()
+
+    result = judge(args)
+
+    if args.json:
+        os.makedirs(os.path.dirname(os.path.abspath(args.json)), exist_ok=True)
+        with open(args.json, "w") as f:
+            json.dump(result, f, indent=2)
+
+    if not args.quiet:
+        mm = result["mismatches"]
+        ss = result["samples"]
+        detail = f" mismatches={mm} samples={ss}" if mm is not None else ""
+        print(f"{result['verdict']}{detail}  log={result['log']}")
+
+    # 退出码携带级别，便于 shell 侧直接判断。
+    # LICENSE_ERROR 这类基础设施错误的 level 是 None —— 判定没有成立，
+    # 一律按未达标退出（与 hls-judge 的处理一致）。
+    lv = result["level"]
+    sys.exit(0 if (lv is not None and lv >= args.level) else 1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,12 +1,10 @@
 {
-  "checksums_scope": "initial distribution bytes; REPORT.md is editable UTF-8 text, not runtime input",
-  "checksums_sha256": "31a8ec6a9cae3ad28500b2921cc1d1abe1fbd30f260dc88fc6bfc5f2d139161a",
-  "editable_documents": [
-    "REPORT.md"
-  ],
-  "file_count": 59,
+  "schema": "rtl-source-release-v1",
+  "version": "1.0.3",
+  "file_count": 85,
+  "checksums_sha256": "587ee42b92870de9210514c809fbb8f9c26b6f79f5950480ed8e8b305ba14cea",
   "package_approved": true,
-  "release": "1.0.1",
   "runtime_tested": false,
-  "schema": "rtl-source-release-v1"
+  "formal_submission_ready": false,
+  "note": "Source consistency is separate from the recorded deployment acceptance."
 }

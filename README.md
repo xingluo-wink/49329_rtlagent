@@ -11,10 +11,12 @@
 | `agent/` | 接题、排队、知识路由、生成、编译、进程管理和交付 |
 | `skill/` | 实际使用的通用知识卡和内容校验清单 |
 | `model/` | 模型说明、权重与运行参数锁 |
-| `serve/start.sh` | 后台启动模型与投题服务，等待真实健康状态 |
+| `serve/start.sh` | 后台启动模型和本地解题引擎，等待就绪 |
+| `serve/run_api.sh` | 开启赛事的鉴权投题接口，转交给同一引擎 |
 | `run.sh` | 读取题目目录，输出 RTL 和执行记录 |
 | `baseline.py`、`run_baseline.sh` | 保持原字节的官方单次调用基线 |
-| `docs/OPERATING.md` | 从环境准备到投题、查询、故障处理的说明 |
+| `docs/QUICKSTART.md` | 从打开终端到完整跑通一道题的操作步骤 |
+| `tools/demo.py` | 自动运行官方计数示例并显示官方自测判分 |
 | `REPORT.md` | 技术报告及本人待填写的位置 |
 | `tools/check_release.py` | 只读检查分发文件、知识卡、模型声明和基线一致性 |
 
@@ -22,13 +24,11 @@
 
 使用锁定的赛事 Linux 镜像、Python 3.11 以上、Uvicorn、对应 ROCm 的 llama.cpp、Vivado 2026.1 和可用许可证。模型文件应提前放到 `model/model-runtime-lock.json` 指定路径；启动时校验大小、SHA-256、后端二进制和实际模型属性。程序不会下载权重或安装依赖。
 
-令牌、主机身份和作业数据存放在仓库外。按 [操作说明](docs/OPERATING.md) 配置后，执行：
+首次使用请看 [跑通一道题](docs/QUICKSTART.md)。文件入口不需要赛事令牌，也不需要手填主机身份。依赖和权重已准备好后，执行：
 
 ```bash
-/opt/python/bin/python3 -B tools/check_release.py
-chmod +x run.sh run_baseline.sh serve/start.sh
-./serve/start.sh
-./run.sh /path/to/problem /path/to/new-output
+bash serve/start.sh
+python3 tools/demo.py
 ```
 
 输入目录必须有 `prompt.txt`，可选 `interface.txt`。官方题面的接口通常已经写在 prompt 中，此时不需要另建 interface。输出目录须为空，正常结束后查看 `solution.v` 和 `trace.jsonl`。不要把生成了文件理解成通过功能评分。
@@ -39,7 +39,7 @@ chmod +x run.sh run_baseline.sh serve/start.sh
 
 ## 接口和边界
 
-投题接口监听 `127.0.0.1:7860`，模型只监听 `127.0.0.1:8000`。无令牌访问健康接口返回 401；带令牌返回 200 且 `ready: true`，才表示当前服务可接题。`POST /v1/solve` 返回 202 与 job_id，再用 `GET /v1/jobs/<job_id>` 查询结果。
+`start.sh` 启动本地 Unix socket 引擎；`run.sh` 或 `python3 tools/solve.py 题目目录` 读取文件、调用该引擎、保存答案。另执行 `bash serve/run_api.sh start` 后，投题接口监听 `127.0.0.1:7860`；模型只监听 `127.0.0.1:8000`。无令牌访问公网健康接口返回 401；带令牌返回 200 且 `ready: true`，才表示可接题。`POST /v1/solve` 返回 202 与 job_id，再用 `GET /v1/jobs/<job_id>` 查询结果。两个入口共享串行队列，不会同时执行两道题。
 
 单题总时限为 900 秒，包含排队。Agent 最多三次模型尝试：路由、首稿、一次符合条件的编译修复。路由选择零张卡，或已确认正常关闭的路由回复为空、格式不可用时，仍进入首稿生成，不再因为选卡环节丢掉整题。直接解题时只发送原始题面、接口和官方基线的系统提示，不添加知识卡或路由短答；路由本身花费的时间仍计入总时限。
 
@@ -55,4 +55,4 @@ chmod +x run.sh run_baseline.sh serve/start.sh
 
 ## 来源与许可
 
-官方基线来自 [rtlagent2026](https://gitee.com/Vickyiii/rtlagent2026)，相关许可证和文件校验值见 `licenses/`。模型按其独立许可证使用。本仓库不包含模型权重、令牌、测试答案、运行日志或开发会话。
+官方基线、自测判定器和公开示例来自 [rtlagent2026](https://gitee.com/Vickyiii/rtlagent2026)，相关许可证见 `licenses/`。`examples/` 的参考实现与测试台只用于独立判分，解题端只读取 prompt.txt 与可选 interface.txt。模型按其独立许可证使用。本仓库不包含模型权重、令牌、比赛隐藏题、运行日志或开发会话。

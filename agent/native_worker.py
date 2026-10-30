@@ -18,7 +18,7 @@ def main(job, receipt):
     model=NativeModel(job/'native-model',receipt,allow_native=True)
     def factory(registry,folder,context,clock):
         return native_backend(registry,folder,context,clock,allow_native=True)
-    adapters=CompilerConnectedAdapters(model,CompilerBridge(factory))
+    adapters=CompilerConnectedAdapters(model,CompilerBridge(factory,local_work=True))
     baseline=None
     if ticket['binding']['request']['mode']=='baseline':
         baseline=native_executor(job/'native-baseline',model,allow_native=True)

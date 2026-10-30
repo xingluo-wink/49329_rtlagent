@@ -43,7 +43,7 @@ class SerialPump:
                 store=self.service.store;pending=[]
                 for path in (store.root/'jobs').iterdir():
                     if not (path/'queued.json').exists():continue
-                    if (path/'final.json').exists() or (path/'expired.json').exists():continue
+                    if (path/'final.json').exists() or (path/'failure-final.json').exists() or (path/'expired.json').exists():continue
                     ticket=store.ticket(path.name)
                     if (path/'launch-intent.json').exists():
                         # A dispatch intent is never replayable after uncertainty.
@@ -63,14 +63,14 @@ class SerialPump:
 
 
 def main(run_root):
-    verify_release();token=private_token()
+    verify_release();token=Path(os.environ.pop('RTL_ENGINE_TOKEN_FILE')).read_text().strip()
     owner=NativeOwner(run_root,allow_native=True)
     pump=None;server=None;watcher=None;stop_watch=None;primary_error=None
     try:
         service=owner.start()
         pump=SerialPump(service);owner.pump=pump;pump.thread.start()
         import uvicorn
-        server=uvicorn.Server(uvicorn.Config(App(service,token=token),host='127.0.0.1',port=7860,
+        server=uvicorn.Server(uvicorn.Config(App(service,token=token),uds=str(owner.root/'engine.sock'),
             workers=1,access_log=False,log_level='warning',timeout_keep_alive=5))
         stop_watch=threading.Event()
         def watch():
@@ -78,7 +78,7 @@ def main(run_root):
                 try:owner.guard()
                 except Exception:server.should_exit=True;return
         watcher=threading.Thread(target=watch,name='rtl-api-owner-monitor',daemon=True);watcher.start()
-        put(owner.root/'api-configured.json',{'host':'127.0.0.1','port':7860,'track':'rtl',
+        put(owner.root/'api-configured.json',{'socket':str(owner.root/'engine.sock'),'track':'rtl',
             'authenticated_all_endpoints':True,'automatic_test_solve_requests':0,
             'real_agent_and_baseline_dispatcher':True,'solve_execution_tested':False})
         server.run()

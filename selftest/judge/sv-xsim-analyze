@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+#=========================================================================
+# sv-xsim-analyze [options] problems
+#=========================================================================
+#
+#  -v --verbose        Display more detail
+#  -h --help           Display this message
+#  -w --wide           Display wide view
+#  -c --csv            Write CSV file
+#     problemdirs      List of problems to analyze
+#
+# 汇总 veval-judge 产出的逐样本判定日志。
+#
+# 本文件改写自 NVlabs/verilog-eval 的 scripts/sv-iv-analyze
+# SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: MIT
+# Author : Christopher Batten, NVIDIA and Nathaniel Pinckney, NVIDIA
+#
+# 赛事方改动：
+#  1. 失败分类表整体重建。上游按 iverilog 的报错字符串字面量分类，
+#     那些字符串在 Vivado 下一条都不会出现；此处改用 Vivado 的消息编号
+#     （VRFC / XSIM），编号由实测采集而来，见 README 的对照表。
+#  2. 按阶段切分日志再分类。judge.log 含 xvlog:dut / xvlog:fixture /
+#     xelab / xsim 四段，固定装置段的告警（如 VRFC 10-3380）不得算到
+#     选手头上，整体扫描会误判。
+#  3. 通过判据增加「采样数不为 0」的检查（评测执行手册 步骤 4）。
+#     上游只看 Mismatches 是否为 0，激励未跑时会假通过。
+#  4. 删除未使用的 langchain 依赖（上游 import 了 SystemMessage /
+#     HumanMessage 但全文未用），使自测脚本的 Python 依赖降为标准库。
+#
+
+import argparse
+import glob
+import os
+import re
+import sys
+
+from collections import OrderedDict
+from dataclasses import dataclass
+
+#-------------------------------------------------------------------------
+# 失败码表
+#-------------------------------------------------------------------------
+# 上游的字母沿用其语义，Vivado 下无对应物的已剔除，新增的见下表末尾。
+
+CODE_DESC = OrderedDict([
+    (".", "通过（Mismatches 为 0 且采样数不为 0）"),
+    ("S", "语法错误                     VRFC 10-4982"),
+    ("d", "标识符未声明                 VRFC 10-2989"),
+    ("w", "对非 reg 的过程赋值          VRFC 10-1280"),
+    ("t", "TopModule 缺失或命名错       VRFC 10-2063 (TopModule)"),
+    ("m", "子模块未找到                 VRFC 10-2063 (其他)"),
+    ("p", "端口绑定失败                 VRFC 10-3180"),
+    ("C", "其他分析期错误               xvlog"),
+    ("E", "其他详细描述错误             xelab"),
+    ("T", "超时                         墙钟或测试台 TIMEOUT"),
+    ("R", "功能失配                     Mismatches 不为 0"),
+    ("Z", "采样数为 0                   激励未运行，按失败计"),
+    ("F", "题目缺陷                     参考实现与测试台不一致"),
+    ("?", "无法分类"),
+])
+
+STAGE_RE = re.compile(r"^===== \[([^\]]+)\]", re.M)
+MISMATCH_RE = re.compile(r"^Mismatches:\s+(\d+)\s+in\s+(\d+)\s+samples", re.M)
+ERR_RE = re.compile(r"ERROR: \[([A-Z]+) ([0-9-]+)\]([^\n]*)")
+
+
+def split_stages(text):
+    """把 judge.log 按 ===== [tag] ===== 切成各阶段。"""
+    parts, last, name = {}, 0, None
+    for m in STAGE_RE.finditer(text):
+        if name:
+            parts[name] = text[last:m.start()]
+        name, last = m.group(1), m.end()
+    if name:
+        parts[name] = text[last:]
+    return parts
+
+
+#-------------------------------------------------------------------------
+# Command line processing
+#-------------------------------------------------------------------------
+
+class ArgumentParserWithCustomError(argparse.ArgumentParser):
+    def error(self, msg=""):
+        if msg:
+            print("\n ERROR: %s" % msg)
+        print("")
+        with open(sys.argv[0]) as f:
+            for (lineno, line) in enumerate(f):
+                if line[0] != '#':
+                    sys.exit(msg != "")
+                if (lineno == 2) or (lineno >= 4):
+                    print(line[1:].rstrip("\n"))
+
+
+def parse_cmdline():
+    p = ArgumentParserWithCustomError(add_help=False)
+    p.add_argument("-h", "--help", action="store_true")
+    p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument("-w", "--wide", action="store_true")
+    p.add_argument("-c", "--csv", type=str)
+    p.add_argument("problems", type=str, nargs="*")
+    opts = p.parse_args()
+    if opts.help:
+        p.error()
+    return opts
+
+
+#-------------------------------------------------------------------------
+# Results
+#-------------------------------------------------------------------------
+
+@dataclass
+class ResultRecord:
+    passfail: str = '?'
+    num_mismatch: int = 0
+    prompt_tokens: int = 0
+    resp_tokens: int = 0
+    cost: float = 0.0
+
+
+class Results:
+
+    def __init__(self, wide):
+        self.data = OrderedDict()
+        self.wide = wide
+
+    def add_result(self, problem, sample, record):
+        sample = int(sample)
+        if problem not in self.data:
+            self.data[problem] = [ResultRecord()] * sample
+        while sample > len(self.data[problem]):
+            self.data[problem].append(ResultRecord())
+        self.data[problem][sample - 1] = record
+
+    def print(self):
+        width = max(len(p) for p in self.data) if self.data else 0
+
+        pass_rate_sum = 0.0
+        total_queries = 0
+        total_prompt_tokens = 0
+        total_resp_tokens = 0
+        total_cost = 0.0
+        total_gsidx = 0.0
+
+        row_strs = []
+        for problem, row in self.data.items():
+            outcome_counts = {}
+            npass = 0
+            ntokens = 0
+            row_str = ""
+            for idx, record in enumerate(row):
+                total_queries += 1
+                total_prompt_tokens += record.prompt_tokens
+                total_resp_tokens += record.resp_tokens
+                total_cost += record.cost
+                ntokens += record.prompt_tokens + record.resp_tokens
+
+                if record.passfail == ".":
+                    npass += 1
+                if idx != 0 and idx % 5 == 0:
+                    row_str += " "
+                row_str += record.passfail
+
+                # 运行期失败按失配数细分，便于区分不同的错法
+                outcome = record.num_mismatch if record.passfail == "R" else record.passfail
+                outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+
+            nsamples = len(row)
+            pass_rate = int((npass / nsamples) * 100)
+            pass_rate_sum += pass_rate
+
+            # Gini-Simpson Index
+            p_squared_sum = sum((c / nsamples) ** 2 for c in outcome_counts.values())
+            total_gsidx += 1 - p_squared_sum
+
+            row_strs.append(
+                f"{problem:{width}} [{npass:02}/{nsamples:02}]({pass_rate:3}%) "
+                f"{ntokens/1000:5.2f} {row_str:24}")
+
+        print("")
+        if not self.wide:
+            for s in row_strs:
+                print(s)
+        else:
+            if len(row_strs) % 2 != 0:
+                row_strs.append("")
+            half = len(row_strs) // 2
+            for a, b in zip(row_strs[:half], row_strs[half:]):
+                print(a, "", b)
+
+        print("")
+        print(f"pass_rate             = {(pass_rate_sum/len(self.data)):>10.2f}")
+        print(f"avg_gini_simpson_idx  = {(total_gsidx/len(self.data)):>10.2f}")
+        print(f"total_prompt_tokens   = {total_prompt_tokens:>10}")
+        print(f"total_resp_tokens     = {total_resp_tokens:>10}")
+        print(f"total_tokens          = {(total_prompt_tokens+total_resp_tokens):>10}")
+        if total_queries:
+            print(f"avg_tokens_per_query  = "
+                  f"{((total_prompt_tokens+total_resp_tokens)/total_queries):>10.2f}")
+        print(f"total_cost            = {total_cost:>10.2f}")
+        print("")
+
+    def print_code_legend(self):
+        counts = {}
+        for row in self.data.values():
+            for r in row:
+                counts[r.passfail] = counts.get(r.passfail, 0) + 1
+        print("失败码分布：")
+        for code, desc in CODE_DESC.items():
+            if counts.get(code):
+                print(f"  {code}  {counts[code]:>5}  {desc}")
+        print("")
+
+    def write_csv(self, csv_filename):
+        with open(csv_filename, 'w') as f:
+            for problem, row in self.data.items():
+                npass = sum(1 for r in row if r.passfail == ".")
+                nsamples = len(row)
+                pass_rate = int((npass / nsamples) * 100)
+                row_str = ",".join(r.passfail for r in row)
+                f.write(f"{problem},{npass},{nsamples},{pass_rate/100.0},{row_str}\n")
+
+
+#-------------------------------------------------------------------------
+# classify
+#-------------------------------------------------------------------------
+
+def classify(judge_log_text):
+    """按阶段切分后分类。返回 (code, num_mismatch)。"""
+    stages = split_stages(judge_log_text)
+
+    # -- 固定装置自身编译失败：是赛事方的题目缺陷，不算选手的错 --
+    fx = stages.get("xvlog:fixture", "")
+    if ERR_RE.search(fx):
+        return "F", 0
+
+    # -- 分析期（只看 DUT 那一段） --
+    dut = stages.get("xvlog:dut", "")
+    m = ERR_RE.search(dut)
+    if m:
+        code = f"{m.group(1)} {m.group(2)}"
+        if code == "VRFC 10-4982":
+            return "S", 0
+        if code == "VRFC 10-2989":
+            return "d", 0
+        if code == "VRFC 10-1280":
+            return "w", 0
+        return "C", 0
+
+    # -- 详细描述期 --
+    el = stages.get("xelab", "")
+    for m in ERR_RE.finditer(el):
+        code = f"{m.group(1)} {m.group(2)}"
+        detail = m.group(3)
+        if code == "VRFC 10-2063":
+            # TopModule 缺失是最常见的 LLM 失败模式，单列一码
+            return ("t" if "TopModule" in detail else "m"), 0
+        if code == "VRFC 10-3180":
+            return "p", 0
+        # XSIM 43-3322 是「静态详细描述失败」的级联消息，不作为首要依据
+        if code.startswith("XSIM"):
+            continue
+        return "E", 0
+    if re.search(r"TIMEOUT \[xelab\]", judge_log_text):
+        return "T", 0
+    if ERR_RE.search(el):
+        return "E", 0
+
+    # -- 仿真期 --
+    if re.search(r"^TIMEOUT", judge_log_text, re.M):
+        return "T", 0
+    mm = MISMATCH_RE.search(judge_log_text)
+    if mm:
+        n, total = int(mm.group(1)), int(mm.group(2))
+        if total == 0:
+            # 采样数为 0 说明激励根本没跑，必须按失败计
+            return "Z", n
+        if n == 0:
+            return ".", 0
+        return "R", n
+
+    return "?", 0
+
+
+#-------------------------------------------------------------------------
+# analyze_result
+#-------------------------------------------------------------------------
+
+def analyze_result(results, problem, sample, generate_log, judge_log):
+    rec = ResultRecord()
+
+    # 生成日志可选：对外发布的自测脚本剥离了 sv-generate，此时无 token 记账
+    if generate_log and os.path.isfile(generate_log):
+        pat = {
+            "prompt_tokens": re.compile(r"prompt_tokens\s*=\s*(\d+)"),
+            "resp_tokens": re.compile(r"resp_tokens\s*=\s*(\d+)"),
+            "cost": re.compile(r"cost\s*=\s*(\d+\.\d+)"),
+        }
+        with open(generate_log, errors="replace") as f:
+            for line in f:
+                if (m := pat["prompt_tokens"].search(line)):
+                    rec.prompt_tokens = int(m.group(1))
+                if (m := pat["resp_tokens"].search(line)):
+                    rec.resp_tokens = int(m.group(1))
+                if (m := pat["cost"].search(line)):
+                    rec.cost = float(m.group(1))
+
+    with open(judge_log, errors="replace") as f:
+        rec.passfail, rec.num_mismatch = classify(f.read())
+
+    results.add_result(problem, sample, rec)
+
+
+def main():
+    opts = parse_cmdline()
+
+    problems = opts.problems or glob.glob("Prob*")
+
+    results = Results(opts.wide)
+    for problem in sorted(problems):
+        problem = problem.rstrip("/")
+        for fn in sorted(glob.glob(f"{problem}/{problem}_sample*-sv-xsim-test.log")):
+            m = re.search(r"sample(\d{2})", fn)
+            if not m:
+                continue
+            n = m.group(1)
+            analyze_result(
+                results, problem, n,
+                f"{problem}/{problem}_sample{n}-sv-generate.log",
+                fn)
+
+    if not results.data:
+        sys.exit("sv-xsim-analyze: 未找到任何 *-sv-xsim-test.log")
+
+    results.print()
+    results.print_code_legend()
+    if opts.csv:
+        results.write_csv(opts.csv)
+
+
+if __name__ == "__main__":
+    main()
