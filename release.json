@@ -2,9 +2,9 @@
   "schema": "rtl-source-release-v1",
   "version": "1.0.5",
   "file_count": 84,
-  "checksums_sha256": "8e484857539cd0e44bc8b158060a038ae9e43bf028b9d88ae6d66baab6d97834",
+  "checksums_sha256": "d03769c4312c7191a131326d69de4c30d9da2f0ebacaf91166408f99838c5fc0",
   "package_approved": true,
   "runtime_tested": false,
   "formal_submission_ready": false,
-  "note": "Source distribution. Documentation cleanup does not change executable code, skills, model configuration or the official baseline."
+  "note": "Source distribution with technical design report. Executable code, skills, model configuration and official baseline remain unchanged."
 }
